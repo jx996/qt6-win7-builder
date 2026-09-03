@@ -23,7 +23,8 @@ param(
     [Parameter(Mandatory)][string]$Version,
     [Parameter(Mandatory)][string]$Destination,
     [string]$CacheRoot,
-    [string]$ArchiveUrl
+    [string]$ArchiveUrl,
+    [switch]$KeepArchive
 )
 
 . "$PSScriptRoot/Common.ps1"
@@ -99,6 +100,12 @@ if (-not (Test-Path -LiteralPath (Join-Path $Destination 'configure.bat'))) {
 }
 
 Remove-Item -LiteralPath $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
+
+if (-not $KeepArchive) {
+    # The archive alone is ~1 GB and the extracted tree is already on disk.
+    Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
+    Write-Info "removed $archive to reclaim disk space"
+}
 
 $modules = Get-ChildItem -LiteralPath $Destination -Directory -Filter 'qt*' |
     Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'CMakeLists.txt') } |

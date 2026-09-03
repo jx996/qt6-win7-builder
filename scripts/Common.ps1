@@ -79,14 +79,14 @@ function Invoke-External {
             Push-Location -LiteralPath $WorkingDirectory
         }
         & $FilePath @Arguments 2>&1 | ForEach-Object { Write-Host $_ }
-        $code = $LASTEXITCODE
+        $code = if (Test-Path variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 }
     }
     finally {
         if ($WorkingDirectory) { Pop-Location }
         $ErrorActionPreference = $previous
     }
 
-    if ($LASTEXITCODE -isnot [int]) { $code = 0 }
+    if ($code -isnot [int]) { $code = 0 }
 
     if ($AllowedExitCodes -notcontains $code) {
         throw "Command failed (exit code $code): $FilePath $rendered"
