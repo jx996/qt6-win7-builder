@@ -1,0 +1,419 @@
+name: Build Qt 6 for Windows 7
+
+# 手动触发：运行时填写要编译的 Qt 版本号，产物以 <版本号>_Windows7.tar.gz 命名
+# 并自动发布到 Releases。
+on:
+  workflow_dispatch:
+    inputs:
+      qt_version:
+        description: 'Qt 版本号（必填），例如 6.8.4 / 6.10.3'
+        required: true
+        default: '6.8.4'
+        type: string
+      patch_ref:
+        description: 'Win7 补丁仓库 crystalidea/qt6windows7 的分支 / tag / commit'
+        required: false
+        default: 'master'
+        type: string
+      arch:
+        description: '目标架构'
+        required: false
+        default: 'x64'
+        type: choice
+        options: [x64, x86]
+      build_type:
+        description: '构建类型（debug-and-release 会显著增加编译时间）'
+        required: false
+        default: 'release'
+        type: choice
+        options: [release, debug, debug-and-release]
+      module_preset:
+        description: '模块集（base=仅 qtbase；essential=常用桌面模块；all=除 WebEngine 外全部）'
+        required: false
+        default: 'essential'
+        type: choice
+        options: [base, essential, all]
+      extra_modules:
+        description: '额外要编译的模块，空格分隔（在模块集基础上追加）'
+        required: false
+        default: ''
+        type: string
+      skip_modules:
+        description: '要跳过的模块，空格分隔'
+        required: false
+        default: ''
+        type: string
+      openssl_mode:
+        description: 'OpenSSL 链接方式（static=从源码静态编译）'
+        required: false
+        default: 'static'
+        type: choice
+        options: [static, none]
+      openssl_version:
+        description: 'OpenSSL 版本（仅 static 模式生效）'
+        required: false
+        default: '3.0.13'
+        type: string
+      ffmpeg_url:
+        description: '可选：预编译 FFmpeg 前缀的 zip 包地址（配合 extra_modules 里的 qtmultimedia）'
+        required: false
+        default: ''
+        type: string
+      build_webengine:
+        description: '额外编译 QtWebEngine + QtPdf（耗时数小时、需数十 GB 磁盘，建议自托管 runner）'
+        required: false
+        default: false
+        type: boolean
+      publish_release:
+        description: '把产物发布/更新到 GitHub Release'
+        required: false
+        default: true
+        type: boolean
+      release_latest:
+        description: '同时把该 Release 标记为 latest'
+        required: false
+        default: false
+        type: boolean
+      retention_days:
+        description: '工作流构件保留天数'
+        required: false
+        default: '7'
+        type: string
+      runs_on:
+        description: '运行器标签（可填自托管 runner 标签，如 self-hosted, windows, x64）'
+        required: false
+        default: 'windows-latest'
+        type: string
+      clean_build_dir:
+        description: '安装后删除构建目录以释放磁盘'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: qt6-win7-${{ inputs.qt_version }}-${{ inputs.arch }}
+  cancel-in-progress: false
+
+env:
+  QT_VERSION: ${{ inputs.qt_version }}
+  QT_ARCH: ${{ inputs.arch }}
+  WORK_DIR: ${{ runner.temp }}\qt6-win7-work
+  SRC_DIR: ${{ runner.temp }}\qt6-win7-work\src
+  INSTALL_DIR: ${{ runner.temp }}\qt6-win7-work\install
+  OPENSSL_DIR: ${{ runner.temp }}\qt6-win7-work\openssl
+  DIST_DIR: ${{ runner.workspace }}\dist
+
+jobs:
+  build:
+    name: Qt ${{ inputs.qt_version }} (${{ inputs.arch }}, ${{ inputs.build_type }}, ${{ inputs.module_preset }})
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Print build configuration
+        shell: pwsh
+        run: |
+          $rows = @(
+            '| 参数 | 值 |',
+            '|---|---|',
+            "| Qt 版本 | ``$env:QT_VERSION`` |",
+            "| 架构 | ``${{ inputs.arch }}`` |",
+            "| 构建类型 | ``${{ inputs.build_type }}`` |",
+            "| 模块集 | ``${{ inputs.module_preset }}`` |",
+            "| 补丁版本 | ``${{ inputs.patch_ref }}`` |",
+            "| OpenSSL | ``${{ inputs.openssl_mode }} ${{ inputs.openssl_version }}`` |",
+            "| QtWebEngine | ``${{ inputs.build_webengine }}`` |",
+            "| 运行器 | ``${{ inputs.runs_on }}`` |",
+            "| 触发者 | @${{ github.actor }} |"
+          )
+          $rows | ForEach-Object { Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $_ }
+          Write-Host "Building Qt $env:QT_VERSION for Windows 7 ($env:QT_ARCH)"
+
+      - name: Free disk space
+        shell: pwsh
+        run: |
+          # GitHub 托管 runner 预装了大量用不到的 SDK，先腾出空间。
+          $targets = @(
+            "$env:LOCALAPPDATA\Android\Sdk"
+            "$env:ProgramFiles\Android"
+            'C:\hostedtoolcache\windows\Go'
+            'C:\hostedtoolcache\windows\Ruby'
+            'C:\hostedtoolcache\windows\Julia'
+            'C:\hostedtoolcache\windows\Haskell'
+            'C:\hostedtoolcache\windows\Boost'
+            'C:\Program Files\Microsoft SQL Server'
+            'C:\Program Files\MySQL'
+            'C:\Program Files\MongoDB'
+            'C:\Program Files\PostgreSQL'
+          )
+          foreach ($t in $targets) {
+            if (Test-Path -LiteralPath $t) {
+              $before = (Get-ChildItem -LiteralPath $t -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+              try {
+                Remove-Item -LiteralPath $t -Recurse -Force -ErrorAction Stop
+                Write-Host "removed $t ($([math]::Round($before/1GB,2)) GB)"
+              } catch { Write-Host "skip $t : $($_.Exception.Message)" }
+            }
+          }
+          Get-PSDrive -PSProvider FileSystem | ForEach-Object {
+            Write-Host ("{0}: {1:N1} GB free" -f $_.Name, ($_.Free/1GB))
+          }
+
+      - name: Verify toolchain
+        shell: pwsh
+        run: |
+          $tools = @('git','cmake','ninja','perl','python','node','tar','7z','nmake')
+          foreach ($t in $tools) {
+            $c = Get-Command $t -ErrorAction SilentlyContinue
+            if ($c) { Write-Host ("{0,-8} {1}" -f $t, $c.Source) } else { Write-Host ("{0,-8} (missing)" -f $t) }
+          }
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (Test-Path -LiteralPath $vswhere) {
+            & $vswhere -latest -products * -property installationPath
+            & $vswhere -latest -products * -property installationVersion
+          }
+          Write-Host "cores: $([Environment]::ProcessorCount)"
+
+      - name: Fetch Qt source
+        shell: pwsh
+        run: |
+          .\scripts\Fetch-QtSource.ps1 -Version $env:QT_VERSION -Destination $env:SRC_DIR -CacheRoot "$env:WORK_DIR\downloads"
+
+      - name: Apply Windows 7 backport patches
+        shell: pwsh
+        run: |
+          .\scripts\Apply-Win7Patches.ps1 `
+            -SourceDir $env:SRC_DIR `
+            -PatchRef '${{ inputs.patch_ref }}' `
+            -WorkDir "$env:WORK_DIR\patches" `
+            -ProvenanceFile "$env:WORK_DIR\win7-patches.json"
+
+      - name: Cache OpenSSL
+        if: inputs.openssl_mode == 'static'
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.OPENSSL_DIR }}
+          key: openssl-${{ inputs.openssl_version }}-${{ inputs.arch }}-vs2022-v1
+
+      - name: Build OpenSSL
+        if: inputs.openssl_mode == 'static'
+        shell: pwsh
+        run: |
+          .\scripts\Build-OpenSSL.ps1 -Version '${{ inputs.openssl_version }}' -Arch $env:QT_ARCH -Prefix $env:OPENSSL_DIR
+
+      - name: Prepare FFmpeg (multimedia)
+        if: inputs.ffmpeg_url != ''
+        shell: pwsh
+        run: |
+          $dest = "$env:WORK_DIR\ffmpeg"
+          New-Item -ItemType Directory -Path $dest -Force | Out-Null
+          $zip = "$env:WORK_DIR\downloads\ffmpeg.zip"
+          New-Item -ItemType Directory -Path (Split-Path $zip) -Force | Out-Null
+          curl.exe -L --fail --retry 5 --retry-all-errors -o $zip "${{ inputs.ffmpeg_url }}"
+          tar.exe -xf $zip -C $dest
+          $root = if (Test-Path "$dest\include") { $dest } else { (Get-ChildItem $dest -Directory | Select-Object -First 1).FullName }
+          Write-Host "FFmpeg prefix: $root"
+          "FFMPEG_DIR=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure Qt
+        shell: pwsh
+        run: |
+          $extra = @()
+          if ($env:EXTRA_MODULES) { $extra += $env:EXTRA_MODULES.Split(' ', [StringSplitOptions]::RemoveEmptyEntries) }
+          $skip = @()
+          if ($env:SKIP_MODULES) { $skip += $env:SKIP_MODULES.Split(' ', [StringSplitOptions]::RemoveEmptyEntries) }
+          $cmakeExtra = @()
+          if ($env:EXTRA_CMAKE_ARGS) { $cmakeExtra += $env:EXTRA_CMAKE_ARGS.Split(' ', [StringSplitOptions]::RemoveEmptyEntries) }
+
+          $params = @{
+            SourceDir      = $env:SRC_DIR
+            InstallDir     = $env:INSTALL_DIR
+            Arch           = $env:QT_ARCH
+            BuildType      = '${{ inputs.build_type }}'
+            ModulePreset   = '${{ inputs.module_preset }}'
+            ExtraModules   = $extra
+            SkipModules    = $skip
+            OpensslMode    = '${{ inputs.openssl_mode }}'
+          }
+          if ('${{ inputs.openssl_mode }}' -eq 'static') { $params.OpensslPrefix = $env:OPENSSL_DIR }
+          if ($env:FFMPEG_DIR) { $params.FfmpegDir = $env:FFMPEG_DIR }
+          if ($cmakeExtra.Count) { $params.ExtraCMakeArgs = $cmakeExtra }
+
+          .\scripts\Configure-Qt.ps1 @params
+        env:
+          EXTRA_MODULES: ${{ inputs.extra_modules }}
+          SKIP_MODULES: ${{ inputs.skip_modules }}
+          EXTRA_CMAKE_ARGS: ${{ vars.QT_EXTRA_CMAKE_ARGS }}
+
+      - name: Build and install Qt
+        shell: pwsh
+        run: |
+          $params = @{
+            SourceDir     = $env:SRC_DIR
+            InstallDir    = $env:INSTALL_DIR
+            BuildType     = '${{ inputs.build_type }}'
+            Arch          = $env:QT_ARCH
+          }
+          if ('${{ inputs.build_webengine }}' -eq 'true') { $params.BuildWebEngine = $true }
+          if ('${{ inputs.clean_build_dir }}' -eq 'true') { $params.CleanBuildDir = $true }
+          .\scripts\Build-Qt.ps1 @params
+
+      - name: Write build manifest
+        shell: pwsh
+        run: |
+          $patchSha = 'n/a'
+          $patchJson = "$env:WORK_DIR\win7-patches.json"
+          if (Test-Path -LiteralPath $patchJson) {
+            $j = Get-Content -LiteralPath $patchJson -Raw | ConvertFrom-Json
+            $patchSha = $j.commit
+          }
+          $info = @(
+            "Qt version          : $env:QT_VERSION"
+            "Architecture        : ${{ inputs.arch }}"
+            "Build type          : ${{ inputs.build_type }}"
+            "Module preset       : ${{ inputs.module_preset }}"
+            "Extra modules       : ${{ inputs.extra_modules }}"
+            "Skipped modules     : ${{ inputs.skip_modules }}"
+            "OpenGL backend      : desktop"
+            "OpenSSL             : ${{ inputs.openssl_mode }} ${{ inputs.openssl_version }}"
+            "QtWebEngine         : ${{ inputs.build_webengine }}"
+            "Win7 patch repo     : https://github.com/crystalidea/qt6windows7"
+            "Win7 patch ref      : ${{ inputs.patch_ref }}"
+            "Win7 patch commit   : $patchSha"
+            "Compiler            : Visual Studio 2022 (MSVC)"
+            "Runner image        : ${{ runner.os }}"
+            "Workflow            : $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            "Source commit       : $env:GITHUB_SHA"
+            "Built at (UTC)      : $((Get-Date).ToUniversalTime().ToString('o'))"
+          )
+          $info | Set-Content -LiteralPath "$env:WORK_DIR\BUILDINFO.txt" -Encoding utf8
+          $info | ForEach-Object { Write-Host $_ }
+
+      - name: Validate artifacts
+        shell: pwsh
+        run: |
+          .\scripts\Test-Artifacts.ps1 -InstallDir $env:INSTALL_DIR -Arch $env:QT_ARCH
+
+      - name: List shipped DLLs
+        shell: pwsh
+        run: |
+          $dlls = Get-ChildItem -LiteralPath "$env:INSTALL_DIR\bin" -Filter '*.dll' -ErrorAction SilentlyContinue
+          Write-Host ("Qt DLLs in bin: {0}" -f $dlls.Count)
+          $dlls | Select-Object -First 40 | ForEach-Object { Write-Host ("  {0}" -f $_.Name) }
+          if ($dlls.Count -gt 40) { Write-Host ("  ... and {0} more" -f ($dlls.Count - 40)) }
+
+      - name: Package
+        id: package
+        shell: pwsh
+        run: |
+          .\scripts\Package-Qt.ps1 `
+            -InstallDir $env:INSTALL_DIR `
+            -Version $env:QT_VERSION `
+            -Arch $env:QT_ARCH `
+            -OutDir $env:DIST_DIR `
+            -InfoFile "$env:WORK_DIR\BUILDINFO.txt"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.artifact-name }}
+          path: |
+            ${{ steps.package.outputs.artifact-path }}
+            ${{ steps.package.outputs.artifact-path }}.sha256
+          retention-days: ${{ fromJSON(inputs.retention_days) }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: inputs.publish_release && success()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.qt_version }}
+          ARCH: ${{ inputs.arch }}
+        run: |
+          set -euo pipefail
+
+          if [ "$ARCH" = "x64" ]; then SUFFIX=""; else SUFFIX="_${ARCH}"; fi
+          FILE="$(ls "${{ env.DIST_DIR }}"/"${VERSION}"_Windows7${SUFFIX}.tar.gz)"
+          NAME="$(basename "$FILE")"
+          TAG="v${VERSION}-win7${SUFFIX}"
+
+          cat > notes.md <<EOF
+          # Qt ${VERSION} for Windows 7 (${ARCH})
+
+          由 GitHub Actions 自动构建，Windows 7 兼容性补丁来自 [crystalidea/qt6windows7](https://github.com/crystalidea/qt6windows7)（\`${{ inputs.patch_ref }}\`）。
+
+          | 项目 | 值 |
+          |---|---|
+          | Qt 版本 | ${VERSION} |
+          | 架构 | ${ARCH} |
+          | 构建类型 | ${{ inputs.build_type }} |
+          | 模块集 | ${{ inputs.module_preset }} |
+          | OpenSSL | ${{ inputs.openssl_mode }} ${{ inputs.openssl_version }} |
+          | QtWebEngine | ${{ inputs.build_webengine }} |
+          | 编译器 | MSVC (Visual Studio 2022) |
+          | 工作流 | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+          ## 使用
+
+          \`\`\`bat
+          mkdir C:\Qt
+          tar -xzf ${NAME} -C C:\Qt\${VERSION}-win7 --strip-components=0
+          \`\`\`
+
+          更推荐把整个目录解开成一个 Qt 前缀后，用 \`CMAKE_PREFIX_PATH\` 指向它：
+
+          \`\`\`bat
+          cmake -S . -B build -DCMAKE_PREFIX_PATH=C:\Qt\${VERSION}-win7
+          \`\`\`
+
+          > GitHub 托管 runner 是 Windows Server，无法真正运行 Windows 7。
+          > 发布前请务必在真实的 Windows 7 x64 机器上做一次冒烟测试。
+
+          ## 校验
+
+          \`\`\`
+          $(cat "${FILE}.sha256")
+          \`\`\`
+          EOF
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，更新同名资产"
+            gh release upload "$TAG" "$FILE" "${FILE}.sha256" --clobber
+          else
+            gh release create "$TAG" "$FILE" "${FILE}.sha256" \
+              --title "Qt ${VERSION} for Windows 7 (${ARCH})" \
+              --notes-file notes.md
+          fi
+
+          if [ "${{ inputs.release_latest }}" = "true" ]; then
+            gh release edit "$TAG" --latest
+          fi
+
+          echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "release_url=${{ github.server_url }}/${{ github.repository }}/releases/tag/$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Build summary
+        if: always()
+        shell: pwsh
+        run: |
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ''
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Job result: ``${{ job.status }}``"
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ inputs.qt_version }}-${{ inputs.arch }}
+          path: |
+            ${{ env.WORK_DIR }}\configure-command.txt
+            ${{ env.WORK_DIR }}\win7-patches.json
+            ${{ env.WORK_DIR }}\BUILDINFO.txt
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,0 +1,18 @@
+# Build artifacts are never committed - the CI runner keeps them on its own disk.
+dist/
+qt-work/
+*.tar.gz
+*.zip
+*.7z
+*.sha256
+
+# Local scratch
+.work/
+.vs/
+*.user
+*.suo
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store

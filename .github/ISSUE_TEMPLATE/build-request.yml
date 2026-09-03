@@ -1,0 +1,65 @@
+name: 请求编译某个 Qt 版本
+description: 填写需要编译的 Qt 版本与选项，维护者可直接用这些参数触发流水线。
+title: "[Build] Qt "
+labels: ["build request"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Qt 版本
+      description: 例如 6.8.4。必须是 download.qt.io 上存在的官方发布版本。
+      placeholder: 6.8.4
+    validations:
+      required: true
+
+  - type: dropdown
+    id: arch
+    attributes:
+      label: 架构
+      options:
+        - x64
+        - x86
+    validations:
+      required: true
+
+  - type: dropdown
+    id: preset
+    attributes:
+      label: 模块集
+      options:
+        - essential
+        - base
+        - all
+    validations:
+      required: true
+
+  - type: dropdown
+    id: build_type
+    attributes:
+      label: 构建类型
+      options:
+        - release
+        - debug-and-release
+        - debug
+    validations:
+      required: true
+
+  - type: input
+    id: extra_modules
+    attributes:
+      label: 额外模块
+      description: 空格分隔，例如 qtmultimedia qtcharts（qtmultimedia 需要同时提供 FFmpeg 前缀地址）
+      placeholder: "qtmultimedia qtcharts"
+
+  - type: input
+    id: patch_ref
+    attributes:
+      label: Win7 补丁版本
+      description: crystalidea/qt6windows7 的分支 / tag / commit，留空用 master
+      placeholder: master
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: 备注
+      description: 例如需要在哪台 Windows 7 机器上验证、用途等。

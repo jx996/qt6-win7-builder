@@ -1,0 +1,7 @@
+# Keep scripts LF-clean for cross platform checkouts.
+*.ps1  text eol=crlf
+*.md   text
+*.yml  text eol=lf
+*.cpp  text eol=lf
+*.txt  text eol=lf
+CMakeLists.txt text eol=lf
