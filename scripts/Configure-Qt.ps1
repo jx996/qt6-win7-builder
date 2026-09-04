@@ -56,8 +56,18 @@ $keep = switch ($ModulePreset) {
 #  - qtwebengine is compiled in a second pass with qt-configure-module.bat
 #  - qtmultimedia: since Qt 6.8 the FFmpeg backend is the only one left on Windows,
 #    so configure hard-fails without an FFmpeg prefix. Skip it unless one was given.
+#  - qtspeech: in Qt 6.8 qtspeech has a HARD dependency on qtmultimedia, so when
+#    qtmultimedia is out qtspeech must go too or the top-level configure aborts
+#    ("Module 'qtspeech' depends on 'qtmultimedia', but building it was disabled").
 $forcedSkip = @('qtwayland', 'qtwebengine')
-if (-not $FfmpegDir) { $forcedSkip += 'qtmultimedia' }
+if (-not $FfmpegDir) { $forcedSkip += @('qtmultimedia', 'qtspeech') }
+
+# If the user explicitly listed a force-skipped module in ExtraModules (e.g. they
+# provided an ffmpeg_url and really want qtmultimedia back), honor that only when the
+# dependency that caused the skip is present. Here: no FFmpeg -> qtmultimedia/qtspeech
+# must stay out regardless of ExtraModules (the whole point of 'forced').
+# (When FFmpeg IS given, qtmultimedia/qtspeech are NOT in $forcedSkip, so ExtraModules
+#  will pull them back in normally.)
 
 # Note the order matters: strips from $keep first, so forced skips always win even
 # when the preset is 'all' (which starts out keeping every detected module).
@@ -129,6 +139,16 @@ $null = New-Item -ItemType Directory -Path $BuildDir -Force
 Write-Step 'Running configure (this produces the feature summary)'
 Invoke-External (Resolve-Path -LiteralPath $configureExe).Path @args -WorkingDirectory $BuildDir
 
+# configure.bat can return a misleading exit code (a leaked native return code is
+# printed as a lone line), so do NOT trust its exit code alone. Verify the Ninja
+# build system was actually produced; otherwise a silent configure failure would
+# surface later as "ninja: error: loading 'build.ninja'" in the build step.
+$ninjaMarker = Join-Path $BuildDir 'build.ninja'
+if (-not (Test-Path -LiteralPath $ninjaMarker)) {
+    $configureCmd = Join-Path (Split-Path -Parent $SourceDir) 'configure-command.txt'
+    throw "configure.bat finished but produced no Ninja build system (missing $ninjaMarker). " +
+          'Qt configure failed - see the errors above. Command was saved to ' + $configureCmd
+}
 Write-Ok "Qt configured ($(Get-Elapsed $start))"
 Write-Info "disk: $(Get-DiskReport)"
 
