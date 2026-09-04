@@ -71,7 +71,10 @@ if (-not (Test-Path -LiteralPath (Join-Path $extractDir 'Configure'))) {
 $target = if ($Arch -eq 'x64') { 'VC-WIN64A' } else { 'VC-WIN32' }
 
 Write-Step "Configuring OpenSSL ($target)"
-Invoke-External perl 'Configure' $target 'no-asm' 'no-shared' 'no-tests' 'no-docs' `
+# NOTE: do NOT pass `no-docs` here - the option was removed in later OpenSSL 3.0.x
+# (3.0.13 rejects it with "Unsupported options: no-docs"). Docs are simply not built
+# because we only run `install_sw` (software install, no doc/man install).
+Invoke-External perl 'Configure' $target 'no-asm' 'no-shared' 'no-tests' `
     "--prefix=$Prefix" "--openssldir=$Prefix\ssl" -WorkingDirectory $extractDir
 
 Write-Step 'Compiling OpenSSL (single threaded nmake, expect 10-20 minutes)'
