@@ -45,6 +45,20 @@ function Get-Stamp {
     Get-Date -Format 'HH:mm:ss'
 }
 
+<#
+.SYNOPSIS
+    Clears $LASTEXITCODE after a native command that succeeded.
+
+.DESCRIPTION
+    GitHub Actions runs every pwsh step as `pwsh -command ". 'script.ps1'"` and then
+    exits with whatever $LASTEXITCODE is left over. Tools like robocopy use 1..7 to
+    mean "copied / nothing to do", so a perfectly successful step would be reported
+    as failed. Always call this after a native command that is known to have worked.
+#>
+function Reset-LastExitCode {
+    $global:LASTEXITCODE = 0
+}
+
 function Get-Elapsed {
     param([Parameter(Mandatory)][datetime]$Start)
     $span = (Get-Date) - $Start
@@ -91,6 +105,8 @@ function Invoke-External {
     if ($AllowedExitCodes -notcontains $code) {
         throw "Command failed (exit code $code): $FilePath $rendered"
     }
+
+    Reset-LastExitCode
     return $code
 }
 
@@ -123,6 +139,7 @@ function Save-RemoteFile {
         if ($code -eq 0 -and (Test-Path -LiteralPath $OutFile) -and ((Get-Item -LiteralPath $OutFile).Length -gt 0)) {
             $size = [math]::Round((Get-Item -LiteralPath $OutFile).Length / 1MB, 1)
             Write-Ok "saved $((Get-Item -LiteralPath $OutFile).Name) (${size} MB)"
+            Reset-LastExitCode
             return $OutFile
         }
         Write-Note "mirror failed: $url"
