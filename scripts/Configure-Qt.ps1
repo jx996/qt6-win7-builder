@@ -51,18 +51,26 @@ $keep = switch ($ModulePreset) {
     default { throw "Unknown preset '$ModulePreset'" }
 }
 
-$keep = @($keep) + @($ExtraModules | Where-Object { $_ }) | Select-Object -Unique
-
-# qtwayland / qtwebengine are never part of the main configure run:
+# Modules that are never part of the main configure run:
 #  - qtwayland is Linux only
 #  - qtwebengine is compiled in a second pass with qt-configure-module.bat
+#  - qtmultimedia: since Qt 6.8 the FFmpeg backend is the only one left on Windows,
+#    so configure hard-fails without an FFmpeg prefix. Skip it unless one was given.
 $forcedSkip = @('qtwayland', 'qtwebengine')
-$skip = @($allModules) + @($forcedSkip) + @($SkipModules | Where-Object { $_ }) |
-    Where-Object { $keep -notcontains $_ } |
-    Select-Object -Unique
+if (-not $FfmpegDir) { $forcedSkip += 'qtmultimedia' }
+
+# Note the order matters: strips from $keep first, so forced skips always win even
+# when the preset is 'all' (which starts out keeping every detected module).
+$keep = @($keep) + @($ExtraModules | Where-Object { $_ })
+$keep = @($keep |
+    Where-Object { ($forcedSkip -notcontains $_) -and ($SkipModules -notcontains $_) } |
+    Select-Object -Unique)
+
+$skip = @($allModules | Where-Object { $keep -notcontains $_ } | Select-Object -Unique)
 
 Write-Info ("modules kept  : " + (($keep | Sort-Object) -join ', '))
 Write-Info ("modules skipped: " + (($skip | Sort-Object) -join ', '))
+Write-Info ("forced skip   : " + ($forcedSkip -join ', '))
 
 # ---------------------------------------------------------------- configure
 $args = @(

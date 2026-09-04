@@ -22,21 +22,21 @@ on:
         type: choice
         options: [x64, x86]
       build_type:
-        description: '构建类型（debug-and-release 会显著增加编译时间）'
+        description: '构建类型（debug-and-release 会显著增加编译时间，all + debug-and-release 建议用自托管 runner）'
         required: false
-        default: 'release'
+        default: 'debug-and-release'
         type: choice
-        options: [release, debug, debug-and-release]
+        options: [debug-and-release, release, debug]
       module_preset:
-        description: '模块集（base=仅 qtbase；essential=常用桌面模块；all=除 WebEngine 外全部）'
+        description: '模块集（base=仅 qtbase；essential=常用桌面模块；all=全部）'
         required: false
-        default: 'essential'
+        default: 'all'
         type: choice
-        options: [base, essential, all]
+        options: [all, essential, base]
       extra_modules:
-        description: '额外要编译的模块，空格分隔（在模块集基础上追加）'
+        description: '额外要编译的模块，空格分隔（在模块集基础上追加；默认已列出全部社区版模块）'
         required: false
-        default: ''
+        default: 'qtbase qtdeclarative qtshadertools qttools qtsvg qtimageformats qt5compat qtactiveqt qtcharts qtdatavis3d qtgraphs qt3d qtquick3d qtquick3dphysics qtquicktimeline qtquickeffectmaker qtlottie qtnetworkauth qtcoap qtmqtt qtopcua qtgrpc qthttpserver qtlanguageserver qtscxml qtremoteobjects qtserialbus qtserialport qtwebsockets qtwebchannel qtwebview qtpositioning qtlocation qtsensors qtspeech qtconnectivity qtvirtualkeyboard qtdoc qttranslations'
         type: string
       skip_modules:
         description: '要跳过的模块，空格分隔'
@@ -87,8 +87,13 @@ on:
       clean_build_dir:
         description: '安装后删除构建目录以释放磁盘'
         required: false
-        default: true
+        default: false
         type: boolean
+      timeout_minutes:
+        description: '任务超时分钟数（GitHub 托管 runner 上限 360；自托管可填更大值）'
+        required: false
+        default: '360'
+        type: string
 
 permissions:
   contents: write
@@ -107,7 +112,7 @@ jobs:
   build:
     name: Qt ${{ inputs.qt_version }} (${{ inputs.arch }}, ${{ inputs.build_type }}, ${{ inputs.module_preset }})
     runs-on: ${{ inputs.runs_on }}
-    timeout-minutes: 360
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) }}
 
     steps:
       - name: Set up paths
@@ -149,36 +154,6 @@ jobs:
           )
           $rows | ForEach-Object { Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $_ }
           Write-Host "Building Qt $env:QT_VERSION for Windows 7 ($env:QT_ARCH)"
-
-      - name: Free disk space
-        shell: pwsh
-        run: |
-          # GitHub 托管 runner 预装了大量用不到的 SDK，先腾出空间。
-          $targets = @(
-            "$env:LOCALAPPDATA\Android\Sdk"
-            "$env:ProgramFiles\Android"
-            'C:\hostedtoolcache\windows\Go'
-            'C:\hostedtoolcache\windows\Ruby'
-            'C:\hostedtoolcache\windows\Julia'
-            'C:\hostedtoolcache\windows\Haskell'
-            'C:\hostedtoolcache\windows\Boost'
-            'C:\Program Files\Microsoft SQL Server'
-            'C:\Program Files\MySQL'
-            'C:\Program Files\MongoDB'
-            'C:\Program Files\PostgreSQL'
-          )
-          foreach ($t in $targets) {
-            if (Test-Path -LiteralPath $t) {
-              $before = (Get-ChildItem -LiteralPath $t -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
-              try {
-                Remove-Item -LiteralPath $t -Recurse -Force -ErrorAction Stop
-                Write-Host "removed $t ($([math]::Round($before/1GB,2)) GB)"
-              } catch { Write-Host "skip $t : $($_.Exception.Message)" }
-            }
-          }
-          Get-PSDrive -PSProvider FileSystem | ForEach-Object {
-            Write-Host ("{0}: {1:N1} GB free" -f $_.Name, ($_.Free/1GB))
-          }
 
       - name: Verify toolchain
         shell: pwsh

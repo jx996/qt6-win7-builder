@@ -16,7 +16,12 @@
 1. Fork 或直接使用本仓库。
 2. 打开 **Actions** → **Build Qt 6 for Windows 7** → **Run workflow**。
 3. 在 **`qt_version`** 里填要编译的 Qt 版本号（例如 `6.8.4`）。
-4. 其余参数用默认值即可，点 **Run workflow**。
+4. 点 **Run workflow**。
+
+> 默认配置是 **`all` + `debug-and-release`**，编译全部开源模块并同时出 Debug 和 Release，
+> 需要 8 ~ 16 小时和 120 GB 左右磁盘，**GitHub 托管 runner 跑不完**。
+> 首次试跑建议把 `module_preset` 改成 `essential`、`build_type` 改成 `release`（约 1.5 ~ 3 小时）；
+> 要跑默认全量配置请改用自托管 runner。详见[耗时与磁盘](#耗时与磁盘)。
 5. 编译结束后：
    - 工作流构件（Artifacts）里有 `6.8.4_Windows7.tar.gz`
    - 同时在 **Releases** 里自动生成 `v6.8.4-win7` 版本并附带同名资产
@@ -35,19 +40,20 @@
 | `qt_version` | `6.8.4` | **必填**。要编译的 Qt 版本，如 `6.8.4`、`6.10.3` |
 | `patch_ref` | `master` | 上游补丁仓库的分支 / tag / commit。建议固定成 commit 以保证可复现 |
 | `arch` | `x64` | `x64` 或 `x86`（x86 不支持 WebEngine / Pdf） |
-| `build_type` | `release` | `release` / `debug` / `debug-and-release` |
-| `module_preset` | `essential` | `base`（仅 qtbase）/ `essential`（常用桌面模块）/ `all` |
-| `extra_modules` | 空 | 在模块集基础上追加，空格分隔，如 `qtmultimedia qtcharts` |
+| `build_type` | `debug-and-release` | `release` / `debug` / `debug-and-release` |
+| `module_preset` | `all` | `base`（仅 qtbase）/ `essential`（常用桌面模块）/ `all` |
+| `extra_modules` | 全部社区版模块 | 在模块集基础上追加，空格分隔。默认已列出 Qt 开源版全部模块 |
 | `skip_modules` | 空 | 要跳过的模块，空格分隔 |
 | `openssl_mode` | `static` | `static`（从源码静态编译 OpenSSL）/ `none` |
 | `openssl_version` | `3.0.13` | 静态编译时使用的 OpenSSL 版本 |
 | `ffmpeg_url` | 空 | 预编译 FFmpeg 前缀的 zip 地址，编译 `qtmultimedia` 时用 |
-| `build_webengine` | `false` | 额外编译 QtWebEngine + QtPdf（**强烈建议自托管 runner**） |
+| `build_webengine` | `false` | 额外编译 QtWebEngine + QtPdf（**必须用自托管 runner**） |
 | `publish_release` | `true` | 是否发布/更新 GitHub Release |
 | `release_latest` | `false` | 是否把该 Release 标记为 latest |
 | `retention_days` | `7` | 工作流构件保留天数 |
 | `runs_on` | `windows-latest` | 运行器标签，可填自托管 runner 标签 |
-| `clean_build_dir` | `true` | 安装后删除构建目录以释放磁盘 |
+| `clean_build_dir` | `false` | 安装后删除构建目录以释放磁盘 |
+| `timeout_minutes` | `360` | 任务超时。GitHub 托管 runner 上限就是 360；自托管可调大 |
 
 模块集说明：
 
@@ -55,7 +61,27 @@
 |---|---|
 | `base` | `qtbase` |
 | `essential` | `qtbase` `qtshadertools` `qtdeclarative` `qtsvg` `qttools` `qtimageformats` `qt5compat` |
-| `all` | 除 `qtwebengine`（单独二遍编译）与 `qtwayland`（Linux 专用）外的全部模块 |
+| `all` | 源码包里检测到的全部模块 |
+
+默认 `extra_modules` 覆盖了 Qt 开源版（LGPL/GPL）的全部模块：
+
+`qtbase` `qtdeclarative` `qtshadertools` `qttools` `qtsvg` `qtimageformats` `qt5compat`
+`qtactiveqt` `qtcharts` `qtdatavis3d` `qtgraphs` `qt3d` `qtquick3d` `qtquick3dphysics`
+`qtquicktimeline` `qtquickeffectmaker` `qtlottie` `qtnetworkauth` `qtcoap` `qtmqtt` `qtopcua`
+`qtgrpc` `qthttpserver` `qtlanguageserver` `qtscxml` `qtremoteobjects` `qtserialbus`
+`qtserialport` `qtwebsockets` `qtwebchannel` `qtwebview` `qtpositioning` `qtlocation`
+`qtsensors` `qtspeech` `qtconnectivity` `qtvirtualkeyboard` `qtdoc` `qttranslations`
+
+> 写进去但源码包里不存在的模块名会被自动忽略，所以同一份清单可以跨版本复用。
+
+**两个例外，需要单独开启：**
+
+- **`qtwebengine`**（含 QtPdf）：Chromium 体积巨大，走单独的二遍编译，用 `build_webengine` 开关控制。
+- **`qtmultimedia`**：Qt 6.8 起 Windows 上只剩 FFmpeg 后端，**没有 FFmpeg 会直接配置失败**。
+  用法：在 `extra_modules` 里加上 `qtmultimedia`，同时在 `ffmpeg_url` 填一个预编译的
+  FFmpeg 前缀 zip（目录结构是 `include/` + `lib/` + `bin/`）。
+
+`qtwayland` 是 Linux 专用，恒定跳过。
 
 ---
 
@@ -102,20 +128,33 @@ cmake --build build --config Release
 
 ---
 
-## 耗时与配额
+## 耗时与磁盘
 
-| 模块集 | GitHub 托管 runner 上的大致耗时 |
-|---|---|
-| `base` | 40 ~ 70 分钟 |
-| `essential` | 1.5 ~ 3 小时 |
-| `all` | 3 ~ 6 小时 |
-| `all` + WebEngine | **会超时 / 磁盘不足，请使用自托管 runner** |
+默认组合是 **`all` + `debug-and-release`**，这是最完整的配置，也是最慢的：
 
-GitHub 托管的 Windows runner 限时 **6 小时**、内存 16 GB。若需要编译完整 Qt 或
-QtWebEngine，请把 `runs_on` 改成自托管 runner 的标签（`self-hosted, windows, x64`）。
+| 配置 | 大致编译时间 | 峰值磁盘占用 |
+|---|---|---|
+| `base` / `release` | 40 ~ 70 分钟 | ~10 GB |
+| `essential` / `release` | 1.5 ~ 3 小时 | ~25 GB |
+| `all` / `release` | 4 ~ 8 小时 | ~60 GB |
+| `all` / `debug-and-release`（默认） | **8 ~ 16 小时** | **~120 GB** |
+| 再加 `build_webengine` | 20 小时以上 | 200 GB 以上 |
+
+因此：
+
+- **GitHub 托管 runner 跑不完默认配置**（限时 6 小时、磁盘约 30~40 GB 可用、
+  4 核 / 16 GB 内存）。要么把 `module_preset` 调成 `essential`、`build_type` 调成
+  `release`，要么把 `runs_on` 改成自托管 runner 的标签（`self-hosted, windows, x64`）
+  并把 `timeout_minutes` 调大。
+- 流水线**不会**去清理 runner 上预装的 SDK，磁盘只增不减；
+  `clean_build_dir` 默认 `false`，所以构建目录会一直留着（方便排查，但很吃空间）。
+  磁盘吃紧时把它打开。
+- 想先看磁盘够不够，可以在触发后第一时间看 **Set up paths** 步骤的输出，
+  那里会打印各分区剩余空间。
 
 自托管 runner 建议自带：Visual Studio 2022（含 MSVC 与 Windows 10/11 SDK）、
-CMake、Ninja、Perl（Strawberry Perl）、Python 3、Node.js、`git`、`tar`、`7z`。
+CMake、Ninja、Perl（Strawberry Perl）、Python 3、Node.js、`git`、`tar`、`7z`，
+以及 **150 GB 以上可用磁盘**。
 
 > OpenSSL 用 `nmake` 单线程编译，约 10 ~ 20 分钟，结果会被 Actions Cache 缓存，
 > 同一版本 + 同一架构第二次构建会直接跳过。
