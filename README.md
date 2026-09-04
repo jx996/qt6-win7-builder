@@ -163,7 +163,8 @@ $work = 'C:\qt-work'
 ## 目录结构
 
 ```text
-.github/workflows/build-qt6-win7.yml   # 唯一的工作流：手动触发，输入 Qt 版本号
+.github/workflows/build-qt6-win7.yml   # 主流程：手动触发，输入 Qt 版本号
+.github/workflows/lint.yml             # actionlint 静态检查，几秒内发现工作流语法/上下文错误
 scripts/Common.ps1                     # 日志、下载、解压、MSVC 环境等公共函数
 scripts/Fetch-QtSource.ps1             # 下载并解包 qt-everywhere 源码
 scripts/Apply-Win7Patches.ps1          # 覆盖式应用 Win7 补丁，输出溯源清单
@@ -174,6 +175,27 @@ scripts/Test-Artifacts.ps1             # 冒烟编译 + PE 导入表 Win7 兼容
 scripts/Package-Qt.ps1                 # 打包 <版本号>_Windows7.tar.gz + SHA256
 tests/hello/                           # 用于冒烟测试的 Qt Widgets 小程序
 ```
+
+## 排查
+
+推送 `.github/workflows/**` 时会自动跑一遍 [actionlint](https://github.com/rhysd/actionlint)，
+几秒内就能发现工作流错误，不用等编译跑到一半才失败。
+
+本地也可以先自检（需要先装 actionlint）：
+
+```bash
+actionlint -no-color
+```
+
+已经踩过一次的坑：**工作流级 `env:` 只能用 `github` / `inputs` / `vars` 三个上下文**，
+`runner.temp` 这类要放到步骤里用 `$GITHUB_ENV` 导出，否则 GitHub 会直接判定工作流文件无效：
+
+```text
+Invalid workflow file: Unrecognized named-value: 'runner'
+```
+
+另外 `runner` 上下文里也没有 `workspace` 属性（只有 `arch` / `debug` / `environment` /
+`name` / `os` / `temp` / `tool_cache`）。
 
 ## 许可
 

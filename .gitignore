@@ -16,3 +16,6 @@ qt-work/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# WorkBuddy 本地记忆目录（不入库）
+.workbuddy/

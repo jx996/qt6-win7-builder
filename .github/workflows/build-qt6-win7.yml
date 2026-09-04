@@ -97,14 +97,11 @@ concurrency:
   group: qt6-win7-${{ inputs.qt_version }}-${{ inputs.arch }}
   cancel-in-progress: false
 
+# 注意:工作流级 env 只允许 github / inputs / vars 三个上下文,
+# runner.* 必须放到步骤里通过 $GITHUB_ENV 动态设置(见 "Set up paths" 步骤)。
 env:
   QT_VERSION: ${{ inputs.qt_version }}
   QT_ARCH: ${{ inputs.arch }}
-  WORK_DIR: ${{ runner.temp }}\qt6-win7-work
-  SRC_DIR: ${{ runner.temp }}\qt6-win7-work\src
-  INSTALL_DIR: ${{ runner.temp }}\qt6-win7-work\install
-  OPENSSL_DIR: ${{ runner.temp }}\qt6-win7-work\openssl
-  DIST_DIR: ${{ runner.workspace }}\dist
 
 jobs:
   build:
@@ -113,6 +110,24 @@ jobs:
     timeout-minutes: 360
 
     steps:
+      - name: Set up paths
+        shell: pwsh
+        run: |
+          # runner.* 上下文只有步骤里能用,这里一次性算好并导出给后续所有步骤。
+          $work = Join-Path $env:RUNNER_TEMP 'qt6-win7-work'
+          @(
+            "WORK_DIR=$work"
+            "SRC_DIR=$work\src"
+            "INSTALL_DIR=$work\install"
+            "OPENSSL_DIR=$work\openssl"
+            "DIST_DIR=$(Join-Path $env:RUNNER_TEMP 'qt6-win7-dist')"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "RUNNER_TEMP = $env:RUNNER_TEMP"
+          Write-Host "WORK_DIR    = $work"
+          Get-PSDrive -PSProvider FileSystem | ForEach-Object {
+            Write-Host ("  drive {0}: {1:N1} GB free" -f $_.Name, ($_.Free / 1GB))
+          }
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -336,11 +351,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ inputs.qt_version }}
           ARCH: ${{ inputs.arch }}
+          DIST_DIR: ${{ env.DIST_DIR }}
         run: |
           set -euo pipefail
 
           if [ "$ARCH" = "x64" ]; then SUFFIX=""; else SUFFIX="_${ARCH}"; fi
-          FILE="$(ls "${{ env.DIST_DIR }}"/"${VERSION}"_Windows7${SUFFIX}.tar.gz)"
+          FILE="$DIST_DIR/${VERSION}_Windows7${SUFFIX}.tar.gz"
+          if [ ! -f "$FILE" ]; then echo "找不到产物: $FILE"; ls -la "$DIST_DIR"; exit 1; fi
           NAME="$(basename "$FILE")"
           TAG="v${VERSION}-win7${SUFFIX}"
 
@@ -363,15 +380,18 @@ jobs:
           ## 使用
 
           \`\`\`bat
-          mkdir C:\Qt
-          tar -xzf ${NAME} -C C:\Qt\${VERSION}-win7 --strip-components=0
+          mkdir "C:/Qt/${VERSION}-win7"
+          tar -xzf ${NAME} -C "C:/Qt/${VERSION}-win7"
           \`\`\`
 
-          更推荐把整个目录解开成一个 Qt 前缀后，用 \`CMAKE_PREFIX_PATH\` 指向它：
+          然后把 CMake 指向解开出来的前缀：
 
           \`\`\`bat
-          cmake -S . -B build -DCMAKE_PREFIX_PATH=C:\Qt\${VERSION}-win7
+          cmake -S . -B build -DCMAKE_PREFIX_PATH="C:/Qt/${VERSION}-win7"
+          cmake --build build --config Release
           \`\`\`
+
+          发布程序时记得连同 \`bin/*.dll\` 与 \`plugins/platforms/qwindows.dll\` 一起带上。
 
           > GitHub 托管 runner 是 Windows Server，无法真正运行 Windows 7。
           > 发布前请务必在真实的 Windows 7 x64 机器上做一次冒烟测试。

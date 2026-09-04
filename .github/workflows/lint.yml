@@ -1,0 +1,32 @@
+name: Lint workflows
+
+# 用 actionlint 静态检查 .github/workflows 下的所有工作流。
+# 它能在几秒内抓出 GitHub 表达式上下文越界这类错误（例如在工作流级 env 里用 runner.*），
+# 否则只有真正推送/触发后才会暴露，白白浪费一次Actions配额。
+on:
+  push:
+    paths: ['.github/workflows/**']
+  pull_request:
+    paths: ['.github/workflows/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download actionlint
+        id: get_actionlint
+        shell: bash
+        run: bash <(curl -sSLf https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) 1.7.12
+
+      - name: Check workflow files
+        shell: bash
+        run: ${{ steps.get_actionlint.outputs.executable }} -color
