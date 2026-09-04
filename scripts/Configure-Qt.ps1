@@ -79,6 +79,7 @@ $args = @(
     '-confirm-license'
     "-opengl", $Opengl
     "-$BuildType"
+    '-shared'
     '-nomake', 'tests'
     '-nomake', 'examples'
 )
@@ -137,3 +138,6 @@ Add-Summary ''
 Add-Summary '```bat'
 Add-Summary $rendered
 Add-Summary '```'
+# GitHub Actions runs each pwsh step as 'pwsh -command ". script"' and exits
+# with the leftover $LASTEXITCODE. A clean completion must report 0.
+Reset-LastExitCode

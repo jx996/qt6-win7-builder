@@ -264,3 +264,6 @@ else {
 }
 
 Write-Ok "Validation finished ($(Get-Elapsed $start))"
+# GitHub Actions runs each pwsh step as 'pwsh -command ". script"' and exits
+# with the leftover $LASTEXITCODE. A clean completion must report 0.
+Reset-LastExitCode

@@ -1,7 +1,11 @@
 # qt6-win7-builder
 
 用 GitHub Actions 自动编译**可在 Windows 7 x64 上运行的 Qt 6**，并把产物打包成
-`<Qt版本号>_Windows7.tar.gz` 自动发布到 Releases。
+`Qt-<版本>-msvc2022-Windows7x64-shared-Release.7z` 自动发布到 Releases。
+
+- **仅动态库（shared / .dll）**，Release 构建。
+- **全部社区开源模块，不含任何商业模块**。
+- 触发时**只需要填 Qt 版本号**（默认 `6.8.4`），其余参数都已设好默认值。
 
 核心的 Windows 7 兼容层来自上游项目 [crystalidea/qt6windows7](https://github.com/crystalidea/qt6windows7)：
 它把 Qt 6 里那些在 Windows 7 上不存在的 API（WinRT、`SetTimerEx`、`DnsQueryEx`、D3D12 等）
@@ -13,22 +17,27 @@
 
 ## 快速开始
 
-1. Fork 或直接使用本仓库。
-2. 打开 **Actions** → **Build Qt 6 for Windows 7** → **Run workflow**。
-3. 在 **`qt_version`** 里填要编译的 Qt 版本号（例如 `6.8.4`）。
-4. 点 **Run workflow**。
+1. 打开 **Actions** → **Build Qt 6 for Windows 7** → **Run workflow**。
+2. 在 **`qt_version`** 里填要编译的 Qt 版本号（默认 `6.8.4`；只填这一项即可）。
+3. 点 **Run workflow**。
 
-> 默认配置是 **`all` + `debug-and-release`**，编译全部开源模块并同时出 Debug 和 Release，
-> 需要 8 ~ 16 小时和 120 GB 左右磁盘，**GitHub 托管 runner 跑不完**。
-> 首次试跑建议把 `module_preset` 改成 `essential`、`build_type` 改成 `release`（约 1.5 ~ 3 小时）；
-> 要跑默认全量配置请改用自托管 runner。详见[耗时与磁盘](#耗时与磁盘)。
-5. 编译结束后：
-   - 工作流构件（Artifacts）里有 `6.8.4_Windows7.tar.gz`
+> 默认配置是 **`all` + `release` + 动态库（shared）**，编译全部社区开源模块并产出 Release 动态库。
+> 完整全量构建需要 4 ~ 8 小时和数十 GB 磁盘，**GitHub 托管 runner 磁盘不够，必须用自托管 runner**。
+> 详见[耗时与磁盘](#耗时与磁盘)与[自托管 runner](#自托管-runner)。
+4. 编译结束后：
+   - 工作流构件（Artifacts）里有 `Qt-6.8.4-msvc2022-Windows7x64-shared-Release.7z`
    - 同时在 **Releases** 里自动生成 `v6.8.4-win7` 版本并附带同名资产
 
 ```text
-6.8.4_Windows7.tar.gz          # 打包好的 Qt（bin/lib/plugins/include/mkspecs ...）
-6.8.4_Windows7.tar.gz.sha256   # 校验值
+Qt-6.8.4-msvc2022-Windows7x64-shared-Release.7z          # 打包好的 Qt（bin/lib/plugins/include/mkspecs ...）
+Qt-6.8.4-msvc2022-Windows7x64-shared-Release.7z.sha256   # 校验值
+```
+
+解包（需要 7-Zip）：
+
+```bat
+mkdir C:\Qt\6.8.4-win7
+7z x Qt-6.8.4-msvc2022-Windows7x64-shared-Release.7z -oC:\Qt\6.8.4-win7
 ```
 
 ---
@@ -39,15 +48,15 @@
 |---|---|---|
 | `qt_version` | `6.8.4` | **必填**。要编译的 Qt 版本，如 `6.8.4`、`6.10.3` |
 | `patch_ref` | `master` | 上游补丁仓库的分支 / tag / commit。建议固定成 commit 以保证可复现 |
-| `arch` | `x64` | `x64` 或 `x86`（x86 不支持 WebEngine / Pdf） |
-| `build_type` | `debug-and-release` | `release` / `debug` / `debug-and-release` |
-| `module_preset` | `all` | `base`（仅 qtbase）/ `essential`（常用桌面模块）/ `all` |
+| `arch` | `x64` | `x64` 或 `x86`（x86 产物名为 `Windows7x86`；x86 不支持 WebEngine / Pdf） |
+| `build_type` | `release` | `release` / `debug` / `debug-and-release`。Qt 始终编译为**动态库(shared)** |
+| `module_preset` | `all` | `base`（仅 qtbase）/ `essential`（常用桌面模块）/ `all`（全部社区开源模块） |
 | `extra_modules` | 全部社区版模块 | 在模块集基础上追加，空格分隔。默认已列出 Qt 开源版全部模块 |
 | `skip_modules` | 空 | 要跳过的模块，空格分隔 |
-| `openssl_mode` | `static` | `static`（从源码静态编译 OpenSSL）/ `none` |
+| `openssl_mode` | `static` | `static`（从源码静态编译 OpenSSL，并链接进 QtNetwork）/ `none` |
 | `openssl_version` | `3.0.13` | 静态编译时使用的 OpenSSL 版本 |
 | `ffmpeg_url` | 空 | 预编译 FFmpeg 前缀的 zip 地址，编译 `qtmultimedia` 时用 |
-| `build_webengine` | `false` | 额外编译 QtWebEngine + QtPdf（**必须用自托管 runner**） |
+| `build_webengine` | `false` | 额外编译 QtWebEngine + QtPdf（**必须用自托管 runner**；Chromium 无法在 Win7 运行） |
 | `publish_release` | `true` | 是否发布/更新 GitHub Release |
 | `release_latest` | `false` | 是否把该 Release 标记为 latest |
 | `retention_days` | `7` | 工作流构件保留天数 |
@@ -102,7 +111,7 @@ BUILDINFO.txt   本次构建的完整参数清单
 
 ```bat
 mkdir C:\Qt\6.8.4-win7
-tar -xzf 6.8.4_Windows7.tar.gz -C C:\Qt\6.8.4-win7
+7z x Qt-6.8.4-msvc2022-Windows7x64-shared-Release.7z -oC:\Qt\6.8.4-win7
 
 cmake -S . -B build -DCMAKE_PREFIX_PATH=C:\Qt\6.8.4-win7
 cmake --build build --config Release
@@ -119,33 +128,32 @@ cmake --build build --config Release
 2. 用 crystalidea/qt6windows7 的替换文件覆盖 qtbase / qtmultimedia / qtwebengine
    —— 附带 win7-patches.json 记录 commit 与文件清单，便于溯源
 3. 静态编译 OpenSSL（结果缓存在 Actions Cache，重复构建可跳过）
-4. configure.bat：-opengl desktop -openssl-linked -- -DOPENSSL_USE_STATIC_LIBS=ON ...
+4. configure.bat：-opengl desktop -shared -openssl-linked -- -DOPENSSL_USE_STATIC_LIBS=ON ...
 5. cmake --build --parallel  →  cmake --install
 6. 冒烟编译 tests/hello，确认这套 Qt 能真正编译链接出一个 Widgets 程序
 7. 扫描所有产出 .dll/.exe 的 PE 导入表，报告 Windows 7 上不存在的 API-Set
-8. 打包成 <Qt版本号>_Windows7.tar.gz 并发布到 Releases
+8. 打包成 Qt-<版本>-msvc2022-Windows7x64-shared-Release.7z 并发布到 Releases
 ```
 
 ---
 
 ## 耗时与磁盘
 
-默认组合是 **`all` + `debug-and-release`**，这是最完整的配置，也是最慢的：
+默认组合是 **`all` + `release` + 动态库(shared)**，编译全部社区开源模块并产出 Release 动态库：
 
 | 配置 | 大致编译时间 | 峰值磁盘占用 |
 |---|---|---|
 | `base` / `release` | 40 ~ 70 分钟 | ~10 GB |
 | `essential` / `release` | 1.5 ~ 3 小时 | ~25 GB |
-| `all` / `release` | 4 ~ 8 小时 | ~60 GB |
-| `all` / `debug-and-release`（默认） | **8 ~ 16 小时** | **~120 GB** |
+| `all` / `release`（默认） | 4 ~ 8 小时 | ~60 GB |
 | 再加 `build_webengine` | 20 小时以上 | 200 GB 以上 |
 
 因此：
 
 - **GitHub 托管 runner 跑不完默认配置**（限时 6 小时、磁盘约 30~40 GB 可用、
-  4 核 / 16 GB 内存）。要么把 `module_preset` 调成 `essential`、`build_type` 调成
-  `release`，要么把 `runs_on` 改成自托管 runner 的标签（`self-hosted, windows, x64`）
-  并把 `timeout_minutes` 调大。
+  4 核 / 16 GB 内存）。默认 `all` + `release` + 动态库 仍需要约 60 GB 峰值磁盘，
+  请改用自托管 runner：把 `runs_on` 改成自托管 runner 的标签（`self-hosted, windows, x64`）
+  并把 `timeout_minutes` 调大（如 `1440`）。
 - 流水线**不会**去清理 runner 上预装的 SDK，磁盘只增不减；
   `clean_build_dir` 默认 `false`，所以构建目录会一直留着（方便排查，但很吃空间）。
   磁盘吃紧时把它打开。
@@ -211,7 +219,7 @@ scripts/Build-OpenSSL.ps1              # 静态编译 OpenSSL
 scripts/Configure-Qt.ps1               # 计算 -skip 列表并执行 configure.bat
 scripts/Build-Qt.ps1                   # cmake --build / --install，可选 WebEngine 二遍编译
 scripts/Test-Artifacts.ps1             # 冒烟编译 + PE 导入表 Win7 兼容审计
-scripts/Package-Qt.ps1                 # 打包 <版本号>_Windows7.tar.gz + SHA256
+scripts/Package-Qt.ps1                 # 打包 Qt-<版本>-msvc2022-Windows7<x64|x86>-shared-Release.7z + SHA256
 tests/hello/                           # 用于冒烟测试的 Qt Widgets 小程序
 ```
 

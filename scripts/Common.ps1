@@ -170,7 +170,7 @@ function Expand-ArchiveUniversal {
     }
     finally { $ErrorActionPreference = $previous }
 
-    if ($code -eq 0) { Write-Ok "extracted with tar: $Path"; return }
+    if ($code -eq 0) { Write-Ok "extracted with tar: $Path"; Reset-LastExitCode; return }
 
     Write-Note "tar failed (code $code), falling back to 7z"
     $sevenZip = @('7z', '7z.exe', '7za.exe') | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
@@ -209,6 +209,7 @@ function Copy-Overlay {
 
     # robocopy: 0..7 mean "files were copied / nothing to do", >= 8 is an error.
     if ($code -ge 8) { throw "robocopy failed (exit code $code) copying $Source -> $Destination" }
+    Reset-LastExitCode
     return $code
 }
 
@@ -224,6 +225,7 @@ function Initialize-MsvcEnvironment {
 
     if (Get-Command 'cl.exe' -ErrorAction SilentlyContinue) {
         Write-Info "MSVC environment already active"
+        Reset-LastExitCode
         return
     }
 
@@ -248,6 +250,7 @@ function Initialize-MsvcEnvironment {
 
     if (-not (Get-Command 'cl.exe' -ErrorAction SilentlyContinue)) { throw "Failed to initialize the MSVC environment" }
     Write-Ok "MSVC environment ready"
+    Reset-LastExitCode
 }
 
 <#

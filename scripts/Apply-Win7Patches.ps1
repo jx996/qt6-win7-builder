@@ -117,3 +117,6 @@ Add-Summary "| Ref | ``$PatchRef`` |"
 Add-Summary "| Commit | ``$sha`` |"
 Add-Summary "| Files applied | $($copied.Count) |"
 Add-Summary "| Modules skipped | $($skipped -join ', ') |"
+# GitHub Actions runs each pwsh step as 'pwsh -command ". script"' and exits
+# with the leftover $LASTEXITCODE. A clean completion must report 0.
+Reset-LastExitCode

@@ -114,3 +114,6 @@ $modules = Get-ChildItem -LiteralPath $Destination -Directory -Filter 'qt*' |
 Write-Ok "Qt $Version source ready at $Destination ($(Get-Elapsed $start))"
 Write-Info ("modules found: " + (($modules | Sort-Object) -join ', '))
 Write-Info "disk: $(Get-DiskReport)"
+# GitHub Actions runs each pwsh step as 'pwsh -command ". script"' and exits
+# with the leftover $LASTEXITCODE. A clean completion must report 0.
+Reset-LastExitCode

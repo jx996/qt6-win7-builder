@@ -1,12 +1,13 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Packs a built Qt install into "<version>_Windows7.tar.gz" plus a SHA-256 file.
+    Packs a built Qt install into "Qt-<version>-msvc2022-Windows7<x64|x86>-shared-Release.7z"
+    plus a SHA-256 file, and exports the artifact coordinates to $GITHUB_OUTPUT.
 
 .DESCRIPTION
     The archive contains the install tree at its root (bin/, lib/, plugins/,
     include/, mkspecs/, ...), so extracting it into e.g. C:\Qt\6.8.4-win7 gives
-    you a drop-in Qt prefix.
+    you a drop-in Qt prefix. Qt is built as shared (dynamic) libraries.
 
 .EXAMPLE
     .\Package-Qt.ps1 -InstallDir C:\qt-work\install -Version 6.8.4 -Arch x64 -OutDir C:\qt-work\dist
@@ -29,8 +30,8 @@ Write-Step 'Packaging the Qt install'
 if (-not (Test-Path -LiteralPath $InstallDir)) { throw "Install dir not found: $InstallDir" }
 $null = New-Item -ItemType Directory -Path $OutDir -Force
 
-$suffix = if ($Arch -eq 'x64') { '' } else { "_$Arch" }
-$name = "${Version}_Windows7${suffix}.tar.gz"
+$plat = if ($Arch -eq 'x64') { 'x64' } else { $Arch }
+$name = "Qt-${Version}-msvc2022-Windows7${plat}-shared-Release.7z"
 $outFile = Join-Path $OutDir $name
 
 if ($InfoFile -and (Test-Path -LiteralPath $InfoFile)) {
@@ -40,19 +41,21 @@ if ($InfoFile -and (Test-Path -LiteralPath $InfoFile)) {
 
 Remove-Item -LiteralPath $outFile -Force -ErrorAction SilentlyContinue
 
-Write-Info "creating $name (gzip level $CompressionLevel)"
-$previous = $ErrorActionPreference
-$ErrorActionPreference = 'Continue'
+$sevenZip = @('7z', '7z.exe', '7za.exe') | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
+if (-not $sevenZip) { throw "7-Zip (7z) not found in PATH; cannot create the .7z package" }
+
+Write-Info "creating $name (7z, compression level $CompressionLevel)"
+# Package the install tree at the archive root, so extraction drops bin/ lib/ ...
+# directly into the target prefix. -mx1 keeps packaging fast; -mmt uses all cores.
+Push-Location -LiteralPath $InstallDir
 try {
-    & tar.exe --options "gzip:compression-level=$CompressionLevel" -czf $outFile -C $InstallDir . 2>&1 | ForEach-Object { Write-Host $_ }
+    & $sevenZip 'a' '-t7z' "-mx$CompressionLevel" '-mmt' $outFile '.' 2>&1 | ForEach-Object { Write-Host $_ }
     $code = $LASTEXITCODE
 }
-finally { $ErrorActionPreference = $previous }
+finally { Pop-Location }
 
-if ($code -ne 0) {
-    Write-Note "tar with a compression hint failed (code $code), retrying with defaults"
-    Invoke-External tar.exe '-czf' $outFile '-C' $InstallDir '.' -Quiet
-}
+if ($code -ne 0) { throw "7z failed (exit code $code) creating $outFile" }
+Reset-LastExitCode
 
 if (-not (Test-Path -LiteralPath $outFile)) { throw "Packaging failed: $outFile was not created" }
 
@@ -82,3 +85,7 @@ Add-Summary "| Size | ${size} MB |"
 Add-Summary "| SHA-256 | ``$hash`` |"
 
 Write-Ok "Packaging finished ($(Get-Elapsed $start))"
+
+# GitHub Actions runs each pwsh step as 'pwsh -command ". script"' and exits
+# with the leftover $LASTEXITCODE. A clean completion must report 0.
+Reset-LastExitCode

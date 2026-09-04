@@ -22,13 +22,13 @@ on:
         type: choice
         options: [x64, x86]
       build_type:
-        description: '构建类型（debug-and-release 会显著增加编译时间，all + debug-and-release 建议用自托管 runner）'
+        description: '构建类型。Qt 默认编译为动态库(shared/.dll)，如需静态库请改用自托管 runner 并修改 Configure-Qt。release 即可满足大部分需求；debug-and-release 耗时翻倍且需要极大磁盘'
         required: false
-        default: 'debug-and-release'
+        default: 'release'
         type: choice
         options: [debug-and-release, release, debug]
       module_preset:
-        description: '模块集（base=仅 qtbase；essential=常用桌面模块；all=全部）'
+        description: '模块集（base=仅 qtbase；essential=常用桌面模块；all=全部社区开源模块，不含商业模块）。默认 all'
         required: false
         default: 'all'
         type: choice
@@ -327,27 +327,34 @@ jobs:
           VERSION: ${{ inputs.qt_version }}
           ARCH: ${{ inputs.arch }}
           DIST_DIR: ${{ env.DIST_DIR }}
+          ARTIFACT_PATH: ${{ steps.package.outputs.artifact-path }}
+          ARTIFACT_NAME: ${{ steps.package.outputs.artifact-name }}
         run: |
           set -euo pipefail
 
+          FILE="$ARTIFACT_PATH"
+          NAME="$ARTIFACT_NAME"
+          if [ -z "$FILE" ] || [ ! -f "$FILE" ]; then
+            echo "找不到产物: $FILE"
+            ls -la "$DIST_DIR"
+            exit 1
+          fi
+
           if [ "$ARCH" = "x64" ]; then SUFFIX=""; else SUFFIX="_${ARCH}"; fi
-          FILE="$DIST_DIR/${VERSION}_Windows7${SUFFIX}.tar.gz"
-          if [ ! -f "$FILE" ]; then echo "找不到产物: $FILE"; ls -la "$DIST_DIR"; exit 1; fi
-          NAME="$(basename "$FILE")"
           TAG="v${VERSION}-win7${SUFFIX}"
 
           cat > notes.md <<EOF
-          # Qt ${VERSION} for Windows 7 (${ARCH})
+          # Qt ${VERSION} for Windows 7 (${ARCH}, shared / Release)
 
-          由 GitHub Actions 自动构建，Windows 7 兼容性补丁来自 [crystalidea/qt6windows7](https://github.com/crystalidea/qt6windows7)（\`${{ inputs.patch_ref }}\`）。
+          由 GitHub Actions 自动构建，Windows 7 兼容性补丁来自 [crystalidea/qt6windows7](https://github.com/crystalidea/qt6windows7)（\`${{ inputs.patch_ref }}\`）。Qt 编译为**动态库(shared/.dll)**，仅含社区开源模块，不含任何商业模块。
 
           | 项目 | 值 |
           |---|---|
           | Qt 版本 | ${VERSION} |
           | 架构 | ${ARCH} |
-          | 构建类型 | ${{ inputs.build_type }} |
-          | 模块集 | ${{ inputs.module_preset }} |
-          | OpenSSL | ${{ inputs.openssl_mode }} ${{ inputs.openssl_version }} |
+          | 构建类型 | ${{ inputs.build_type }} (动态库 / shared) |
+          | 模块集 | ${{ inputs.module_preset }}（全部社区开源模块） |
+          | OpenSSL | ${{ inputs.openssl_mode }} ${{ inputs.openssl_version }}（静态链接进 QtNetwork） |
           | QtWebEngine | ${{ inputs.build_webengine }} |
           | 编译器 | MSVC (Visual Studio 2022) |
           | 工作流 | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
@@ -356,7 +363,7 @@ jobs:
 
           \`\`\`bat
           mkdir "C:/Qt/${VERSION}-win7"
-          tar -xzf ${NAME} -C "C:/Qt/${VERSION}-win7"
+          7z x ${NAME} -o"C:/Qt/${VERSION}-win7"
           \`\`\`
 
           然后把 CMake 指向解开出来的前缀：
@@ -383,7 +390,7 @@ jobs:
             gh release upload "$TAG" "$FILE" "${FILE}.sha256" --clobber
           else
             gh release create "$TAG" "$FILE" "${FILE}.sha256" \
-              --title "Qt ${VERSION} for Windows 7 (${ARCH})" \
+              --title "Qt ${VERSION} for Windows 7 (${ARCH}, shared)" \
               --notes-file notes.md
           fi
 
