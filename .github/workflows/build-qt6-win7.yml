@@ -39,9 +39,9 @@ on:
         default: 'qtbase qtdeclarative qtshadertools qttools qtsvg qtimageformats qt5compat qtactiveqt qtcharts qtdatavis3d qtgraphs qt3d qtquick3d qtquick3dphysics qtquicktimeline qtquickeffectmaker qtlottie qtnetworkauth qtcoap qtmqtt qtopcua qtgrpc qthttpserver qtlanguageserver qtscxml qtremoteobjects qtserialbus qtserialport qtwebsockets qtwebchannel qtwebview qtpositioning qtlocation qtsensors qtspeech qtconnectivity qtvirtualkeyboard qtdoc qttranslations'
         type: string
       skip_modules:
-        description: '要跳过的模块，空格分隔'
+        description: '要跳过的模块，空格分隔。默认跳过 qtopcua：Qt 6.8.x + MSVC 下 moc 生成的 QOpcUa::NodeIds 会撑爆编译器限制（QTBUG-131516，Qt 6.9 才修复），清空该项可自行尝试'
         required: false
-        default: ''
+        default: 'qtopcua'
         type: string
       openssl_mode:
         description: 'OpenSSL 链接方式（static=从源码静态编译）'

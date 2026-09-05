@@ -52,7 +52,7 @@ mkdir C:\Qt\6.8.4-win7
 | `build_type` | `release` | `release` / `debug` / `debug-and-release`。Qt 始终编译为**动态库(shared)** |
 | `module_preset` | `all` | `base`（仅 qtbase）/ `essential`（常用桌面模块）/ `all`（全部社区开源模块） |
 | `extra_modules` | 全部社区版模块 | 在模块集基础上追加，空格分隔。默认已列出 Qt 开源版全部模块 |
-| `skip_modules` | 空 | 要跳过的模块，空格分隔 |
+| `skip_modules` | `qtopcua` | 要跳过的模块，空格分隔。默认跳过 `qtopcua`，原因见[已知模块限制](#已知模块限制) |
 | `openssl_mode` | `static` | `static`（从源码静态编译 OpenSSL，并链接进 QtNetwork）/ `none` |
 | `openssl_version` | `3.0.13` | 静态编译时使用的 OpenSSL 版本 |
 | `ffmpeg_url` | 空 | 预编译 FFmpeg 前缀的 zip 地址，编译 `qtmultimedia` 时用 |
@@ -93,6 +93,18 @@ mkdir C:\Qt\6.8.4-win7
 `qtwayland` 是 Linux 专用，恒定跳过。
 
 ---
+
+## 已知模块限制
+
+| 模块 | 状态 | 说明 |
+|---|---|---|
+| `qtwayland` | 始终跳过 | Linux 专用 |
+| `qtwebengine` / `qtpdf` | 默认跳过 | 需 `build_webengine=true` 二次编译；且 Chromium 已不支持 Windows 7 |
+| `qtmultimedia` / `qtspeech` | 无 `ffmpeg_url` 时跳过 | Qt 6.8 起 Windows 仅剩 FFmpeg 后端；`qtspeech` 硬依赖 `qtmultimedia`，两者必须同进同出。提供 `ffmpeg_url` 后会自动编入 |
+| `qtopcua` | **默认跳过** | **Qt 6.8.x + MSVC 的上游 bug（[QTBUG-131516](https://bugreports.qt.io/browse/QTBUG-131516)）**：`QOpcUa::NodeIds` 枚举过大，moc 生成的代码超出 MSVC 编译器限制（`C1106: only 16000 function parameters are allowed`）。官方修复只进了 **Qt 6.9.0**。构建 6.8.x 请把 `skip_modules` 保持默认；升级到 6.9+ 后可清空该项 |
+
+> 想验证 `qtopcua` 是否仍失败，把 `skip_modules` 清空再跑一次即可，报错会直接指向
+> `qopcuanodeids.cpp`。
 
 ## 产物内容
 
