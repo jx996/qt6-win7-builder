@@ -80,9 +80,9 @@ on:
         default: '7'
         type: string
       runs_on:
-        description: '运行器标签（可填自托管 runner 标签，如 self-hosted, windows, x64）'
+        description: '运行器标签。默认 windows-2022（VS 2022 / MSVC 14.4x）——关键：VS2026 的 VC++ 运行库只支持 Win10+，用它编出来的 Qt 在 Win7 上无法运行；且 Qt 6.8.4 官方只验证到 MSVC 2022。也可填自托管 runner 标签，如 self-hosted, windows, x64'
         required: false
-        default: 'windows-latest'
+        default: 'windows-2022'
         type: string
       clean_build_dir:
         description: '安装后删除构建目录以释放磁盘'

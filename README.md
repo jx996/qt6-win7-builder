@@ -107,15 +107,38 @@ mkdir C:\Qt\6.8.4-win7
 > 想验证 `qtopcua` 是否仍失败，把 `skip_modules` 清空再跑一次即可，报错会直接指向
 > `qopcuanodeids.cpp`。
 
-### ⚠️ 工具链版本：别用比 VS 2022 更新的 MSVC
+### 🚨 最重要的一条：必须用 VS 2022（MSVC 14.4x），不能用 VS 2026
 
-GitHub 托管 runner 现在已经预装 **Visual Studio 18 / MSVC 14.51**，而 **Qt 6.8.4 官方只验证到
-MSVC 2019/2022（14.29–14.4x）**。用 14.51 编 6.8.4 会额外踩到一批"新编译器 stricter"的坑，
-例如上面的 `STL1011`（`<experimental/coroutine>` 被微软列为硬错误）。
+这不是"编译能不能过"的问题，而是**产出的 Qt 在 Windows 7 上能不能运行**的问题：
 
-**强烈建议在自托管 runner 上用 Visual Studio 2022 构建**，能省掉这一类与 Win7 目标无关的编译错误。
-自托管 runner 需要：VS 2022（含 MSVC + Windows 10/11 SDK）、CMake、Ninja、Strawberry Perl、
-Python 3、Node.js、`git`、`tar`、`7z`，以及 **150 GB 以上可用磁盘**。
+| 工具链 | VC++ 运行库 | Win7 支持 | 结论 |
+|---|---|---|---|
+| **VS 2022 / MSVC 14.4x** | v14.4x | ✅ 支持 Windows 7 SP1（需 KB3033929） | ✅ **可用** |
+| VS 2026 / MSVC 14.51 | v14.50+ | ❌ **仅 Windows 10 / 11 与 Server 2016+** | ❌ **出来的 Qt 在 Win7 上跑不起来** |
+
+微软官方《Latest supported Visual C++ Redistributable downloads》明确写明：
+> The latest version of the Visual C++ v14 Redistributable included with Visual Studio 2026
+> supports only: Windows 10 and 11, Windows Server 2016, 2019, 2022, and 2025.
+
+而运行时版本号必须 **≥ 编译时 MSVC 工具集版本**，所以：**用 MSVC 14.51 编译 ⇒ 目标机必须装
+14.51 运行库 ⇒ 目标机必须是 Win10+。** 用它编 Qt 给 Win7 用，从根上就不成立。
+
+#### 因此：把 runner 钉到 `windows-2022`
+
+GitHub 的 `windows-latest` 已在 2025 年 9 月迁移到 Windows Server 2025，现在是
+`windows-2025-vs2026`（预装 VS 2026 / MSVC 14.51）。**而 `windows-2022` 镜像目前仍然受支持。**
+
+```yaml
+runs_on: windows-2022      # 工作流里这一项的默认值已经是它
+```
+
+一个改动同时带来三个好处：
+1. VC++ 运行库 14.4x **支持 Windows 7 SP1** → 产物真正可部署；
+2. Qt 6.8.4 官方验证的就是 MSVC 2022 → 避开 `STL1011` 那类新 STL/编译器的误伤；
+3. **不需要自建 runner**，托管 runner 直接可用（且已实测 D: 有 147 GB、全量约 2.8h，资源够）。
+
+> ⚠️ `windows-2022` 终将被弃用（有资料称约 2028 年）。届时改用装了 VS 2022 的**自托管 runner**
+> （`runs_on` 填 `self-hosted, windows, x64`），**关键是 MSVC 工具集必须 ≤ 14.4x**。
 
 ## Windows 7 兼容性是怎么保证的
 
