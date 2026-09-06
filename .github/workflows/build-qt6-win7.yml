@@ -376,11 +376,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          FILE="$ARTIFACT_PATH"
+          # ARTIFACT_PATH / DIST_DIR 来自 PowerShell，是反斜杠路径。
+          # Git Bash 的 test/cat 和传给 gh 的参数统一成正斜杠最稳妥。
+          FILE="${ARTIFACT_PATH//\\//}"
+          DIST_DIR="${DIST_DIR//\\//}"
           NAME="$ARTIFACT_NAME"
           if [ -z "$FILE" ] || [ ! -f "$FILE" ]; then
             echo "找不到产物: $FILE"
-            ls -la "$DIST_DIR"
+            ls -la "$DIST_DIR" || true
             exit 1
           fi
 
