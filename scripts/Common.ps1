@@ -365,6 +365,26 @@ function Initialize-MsvcEnvironment {
     finally { $ErrorActionPreference = $previous }
 
     if (-not (Get-Command 'cl.exe' -ErrorAction SilentlyContinue)) { throw "Failed to initialize the MSVC environment" }
+
+    # Record the exact compiler identity in the log: it proves which toolset
+    # produced the binaries, and therefore which VC++ runtime they require.
+    # (MSVC 14.4x / VS 2022 => runtime supports Windows 7 SP1; MSVC 14.5x / VS 2026
+    #  => runtime requires Windows 10+, which would make a Win7 build pointless.)
+    try {
+        $cl = (Get-Command 'cl.exe' -ErrorAction SilentlyContinue).Source
+        if ($cl) {
+            $previous = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                $banner = (& $cl 2>&1 | Select-Object -First 1)
+            }
+            finally { $ErrorActionPreference = $previous }
+            if ($banner) { Write-Info "compiler: $banner" }
+        }
+    }
+    catch { Write-Verbose "could not read the cl.exe banner: $($_.Exception.Message)" }
+    Reset-LastExitCode
+
     Write-Ok "MSVC environment ready"
     Reset-LastExitCode
 }

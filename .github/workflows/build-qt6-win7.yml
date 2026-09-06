@@ -298,6 +298,15 @@ jobs:
             $j = Get-Content -LiteralPath $patchJson -Raw | ConvertFrom-Json
             $patchSha = $j.commit
           }
+          # 实际编译器版本：决定 VC++ 运行库版本，进而决定产物能否上 Win7
+          # （MSVC 14.4x/VS2022 运行库支持 Win7 SP1；14.5x/VS2026 仅支持 Win10+）
+          $compiler = 'unknown'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (Test-Path -LiteralPath $vswhere) {
+            $toolVer = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion | Select-Object -First 1)
+            $productLine = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property catalog_productLineVersion | Select-Object -First 1)
+            if ($toolVer) { $compiler = "MSVC $toolVer (Visual Studio $productLine)" }
+          }
           $info = @(
             "Qt version          : $env:QT_VERSION"
             "Architecture        : ${{ inputs.arch }}"
@@ -311,7 +320,7 @@ jobs:
             "Win7 patch repo     : https://github.com/crystalidea/qt6windows7"
             "Win7 patch ref      : ${{ inputs.patch_ref }}"
             "Win7 patch commit   : $patchSha"
-            "Compiler            : Visual Studio 2022 (MSVC)"
+            "Compiler            : $compiler"
             "Runner image        : ${{ runner.os }}"
             "Workflow            : $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
             "Source commit       : $env:GITHUB_SHA"
