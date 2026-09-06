@@ -102,9 +102,20 @@ mkdir C:\Qt\6.8.4-win7
 | `qtwebengine` / `qtpdf` | 默认跳过 | 需 `build_webengine=true` 二次编译；且 Chromium 已不支持 Windows 7 |
 | `qtmultimedia` / `qtspeech` | 无 `ffmpeg_url` 时跳过 | Qt 6.8 起 Windows 仅剩 FFmpeg 后端；`qtspeech` 硬依赖 `qtmultimedia`，两者必须同进同出。提供 `ffmpeg_url` 后会自动编入 |
 | `qtopcua` | **默认跳过** | **Qt 6.8.x + MSVC 的上游 bug（[QTBUG-131516](https://bugreports.qt.io/browse/QTBUG-131516)）**：`QOpcUa::NodeIds` 枚举过大，moc 生成的代码超出 MSVC 编译器限制（`C1106: only 16000 function parameters are allowed`）。官方修复只进了 **Qt 6.9.0**。构建 6.8.x 请把 `skip_modules` 保持默认；升级到 6.9+ 后可清空该项 |
+| `qtconnectivity` | **默认跳过** | Windows 版 QtBluetooth **只有 WinRT 后端**，而 WinRT 是 Windows 8+ 才有的，Windows 7 上不存在——就算编出来在 Win7 也用不了。另外用新 MSVC 编译时它会撞 `<experimental/coroutine>` 的 `STL1011` 硬错误（该头文件已被微软标记即将移除）。**结论：Win7 目标下不要编蓝牙** |
 
 > 想验证 `qtopcua` 是否仍失败，把 `skip_modules` 清空再跑一次即可，报错会直接指向
 > `qopcuanodeids.cpp`。
+
+### ⚠️ 工具链版本：别用比 VS 2022 更新的 MSVC
+
+GitHub 托管 runner 现在已经预装 **Visual Studio 18 / MSVC 14.51**，而 **Qt 6.8.4 官方只验证到
+MSVC 2019/2022（14.29–14.4x）**。用 14.51 编 6.8.4 会额外踩到一批"新编译器 stricter"的坑，
+例如上面的 `STL1011`（`<experimental/coroutine>` 被微软列为硬错误）。
+
+**强烈建议在自托管 runner 上用 Visual Studio 2022 构建**，能省掉这一类与 Win7 目标无关的编译错误。
+自托管 runner 需要：VS 2022（含 MSVC + Windows 10/11 SDK）、CMake、Ninja、Strawberry Perl、
+Python 3、Node.js、`git`、`tar`、`7z`，以及 **150 GB 以上可用磁盘**。
 
 ## 产物内容
 
