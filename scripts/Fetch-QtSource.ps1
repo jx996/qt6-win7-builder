@@ -68,7 +68,7 @@ else {
 }
 
 $archive = Join-Path $CacheRoot $archiveName
-Write-Info "disk: $(Get-DiskReport)"
+Write-Info "disk: $(Get-DiskReport -Path $CacheRoot)"
 Write-Info "target source dir: $Destination"
 
 if (Test-Path -LiteralPath (Join-Path $Destination 'configure.bat')) {
@@ -113,7 +113,7 @@ $modules = Get-ChildItem -LiteralPath $Destination -Directory -Filter 'qt*' |
 
 Write-Ok "Qt $Version source ready at $Destination ($(Get-Elapsed $start))"
 Write-Info ("modules found: " + (($modules | Sort-Object) -join ', '))
-Write-Info "disk: $(Get-DiskReport)"
+Write-Info "disk: $(Get-DiskReport -Path $CacheRoot)"
 # GitHub Actions runs each pwsh step as 'pwsh -command ". script"' and exits
 # with the leftover $LASTEXITCODE. A clean completion must report 0.
 Reset-LastExitCode

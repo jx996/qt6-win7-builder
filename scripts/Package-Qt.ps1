@@ -54,7 +54,11 @@ try {
 }
 finally { Pop-Location }
 
-if ($code -ne 0) { throw "7z failed (exit code $code) creating $outFile" }
+# 7-Zip exit codes: 0 = ok, 1 = warning (non fatal, archive was still written),
+# 2 = fatal error, 7 = command line error, 8 = out of memory, 255 = user stop.
+# Do NOT treat 1 as failure - that is the same class of bug as robocopy's 1..7.
+if ($code -ge 2) { throw "7z failed (exit code $code) creating $outFile" }
+if ($code -eq 1) { Write-Note "7z returned 1 (warning, non fatal) - archive should still be valid" }
 Reset-LastExitCode
 
 if (-not (Test-Path -LiteralPath $outFile)) { throw "Packaging failed: $outFile was not created" }

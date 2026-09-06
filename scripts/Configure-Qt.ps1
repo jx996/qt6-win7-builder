@@ -150,7 +150,7 @@ if (-not (Test-Path -LiteralPath $ninjaMarker)) {
           'Qt configure failed - see the errors above. Command was saved to ' + $configureCmd
 }
 Write-Ok "Qt configured ($(Get-Elapsed $start))"
-Write-Info "disk: $(Get-DiskReport)"
+Write-Info "disk: $(Get-DiskReport -Path $BuildDir)"
 
 Add-Summary ''
 Add-Summary "### Qt configure"

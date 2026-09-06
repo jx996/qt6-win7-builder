@@ -264,8 +264,31 @@ function Add-Summary {
 }
 
 function Get-DiskReport {
+    <#
+    .SYNOPSIS
+        Reports free space on the drive that actually hosts $Path.
+
+    .DESCRIPTION
+        The build lives on $env:RUNNER_TEMP, which on GitHub-hosted runners is on the
+        D: drive (C: is the small OS disk). Reporting C: by default is actively
+        misleading when debugging "out of disk" failures, so callers should pass a
+        path inside the work tree. If the path does not exist yet, the nearest
+        existing ancestor is used.
+    #>
     param([string]$Path = 'C:\')
-    $drive = (Get-Item -LiteralPath $Path).PSDrive.Name
+
+    $item = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
+    if (-not $item) {
+        $probe = $Path
+        while ($probe -and -not (Test-Path -LiteralPath $probe)) {
+            $probe = Split-Path -Path $probe -Parent
+        }
+        if ($probe) { $item = Get-Item -LiteralPath $probe -ErrorAction SilentlyContinue }
+    }
+
+    if (-not $item) { return "disk: unknown (no existing path under '$Path')" }
+
+    $drive = $item.PSDrive.Name
     $psd = Get-PSDrive -Name $drive
     return "{0}: {1:N1} GB free / {2:N1} GB used" -f $drive, ($psd.Free / 1GB), ($psd.Used / 1GB)
 }

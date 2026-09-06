@@ -37,7 +37,7 @@ $configs = switch ($BuildType) {
 
 $cores = [Environment]::ProcessorCount
 Write-Info "parallel jobs: $cores"
-Write-Info "disk: $(Get-DiskReport)"
+Write-Info "disk: $(Get-DiskReport -Path $BuildDir)"
 
 Invoke-External cmake '--build' '.' '--parallel' -WorkingDirectory $BuildDir
 
@@ -50,12 +50,12 @@ if (-not (Test-Path -LiteralPath (Join-Path $InstallDir 'bin'))) {
     throw "Install did not produce $InstallDir\bin"
 }
 Write-Ok "Qt installed ($(Get-Elapsed $start))"
-Write-Info "disk: $(Get-DiskReport)"
+Write-Info "disk: $(Get-DiskReport -Path $BuildDir)"
 
 if ($CleanBuildDir) {
     Write-Step 'Removing the build directory to reclaim disk space'
     Remove-Item -LiteralPath $BuildDir -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Info "disk: $(Get-DiskReport)"
+    Write-Info "disk: $(Get-DiskReport -Path $BuildDir)"
 }
 
 # ------------------------------------------------------- QtWebEngine / QtPdf

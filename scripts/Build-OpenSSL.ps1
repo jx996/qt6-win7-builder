@@ -88,7 +88,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $Prefix 'lib'))) {
 }
 
 Write-Ok "OpenSSL $Version installed to $Prefix ($(Get-Elapsed $start))"
-Write-Info "disk: $(Get-DiskReport)"
+Write-Info "disk: $(Get-DiskReport -Path $Prefix)"
 # GitHub Actions runs each pwsh step as 'pwsh -command ". script"' and exits
 # with the leftover $LASTEXITCODE. A clean completion must report 0.
 Reset-LastExitCode
