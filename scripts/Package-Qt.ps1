@@ -41,7 +41,10 @@ if ($InfoFile -and (Test-Path -LiteralPath $InfoFile)) {
 
 Remove-Item -LiteralPath $outFile -Force -ErrorAction SilentlyContinue
 
-$sevenZip = @('7z', '7z.exe', '7za.exe') | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
+$sevenZipCmd = @('7z', '7z.exe', '7za.exe') |
+    ForEach-Object { Get-Command $_ -ErrorAction SilentlyContinue } |
+    Select-Object -First 1
+$sevenZip = if ($sevenZipCmd) { $sevenZipCmd.Source } else { $null }
 if (-not $sevenZip) {
     # Installed but not on PATH (the "Ensure 7-Zip" workflow step covers this too).
     $sevenZip = @(

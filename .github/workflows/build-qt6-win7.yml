@@ -179,9 +179,13 @@ jobs:
             "$env:ProgramFiles\7-Zip",
             "${env:ProgramFiles(x86)}\7-Zip"
           )
-          $exe = @('7z', '7z.exe', '7za.exe') |
-            Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } |
+          # 注意: Get-Command 返回的是命令对象, 必须取 .Source(完整路径),
+          # 否则后面 Test-Path 拿到的是 '7z' 这种命令名而不是路径。
+          $cmd = @('7z', '7z.exe', '7za.exe') |
+            ForEach-Object { Get-Command $_ -ErrorAction SilentlyContinue } |
             Select-Object -First 1
+          $exe = if ($cmd) { $cmd.Source } else { $null }
+
           if (-not $exe) {
             $exe = $installDirs | ForEach-Object { Join-Path $_ '7z.exe' } |
               Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
