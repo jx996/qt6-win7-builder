@@ -117,6 +117,52 @@ MSVC 2019/2022（14.29–14.4x）**。用 14.51 编 6.8.4 会额外踩到一批"
 自托管 runner 需要：VS 2022（含 MSVC + Windows 10/11 SDK）、CMake、Ninja、Strawberry Perl、
 Python 3、Node.js、`git`、`tar`、`7z`，以及 **150 GB 以上可用磁盘**。
 
+## Windows 7 兼容性是怎么保证的
+
+> **本项目的目标不是"编出全部模块"，而是"编出的 Qt 能在 Windows 7 上真的跑起来"。**
+> 因此某些模块被默认跳过（见[已知模块限制](#已知模块限制)）——它们要么依赖 Win7 上不存在的
+> WinRT，要么在该 Qt 版本 + MSVC 下本身就无法编译。**为了凑模块数去死磕它们是偏离目标的。**
+
+### 兼容机制（来自上游）
+
+[crystalidea/qt6windows7](https://github.com/crystalidea/qt6windows7) 把 Qt 6 里那些 Windows 7
+上不存在的 API（WinRT、`SetTimerEx`、`DnsQueryEx`、D3D12、HighDPI 等）改成
+**运行时 `GetProcAddress` + 回退实现**。这样同一份 Qt 在 Win7 / 8 / 10 / 11 上都能加载运行。
+
+### 我们的三层校验（`scripts/Test-Artifacts.ps1`）
+
+| 层次 | 检查内容 | 意义 |
+|---|---|---|
+| 烟雾构建 | 用编出来的 Qt 编译链接一个 Widgets 程序 | 证明这套 Qt 能被真正使用 |
+| API-Set 扫描 | 导入表里有没有 Win7 上不存在的 `api-ms-win-*` / `ext-ms-win-*` | 通常是延迟加载，命中多为警告 |
+| **静态导入函数扫描** | **只扫常规导入表（DataDirectory[1]），查有没有 Win8/10 才有的函数**（`GetDpiForWindow`、`GetAddrInfoEx`、`RoGetActivationFactory` 等） | **最关键的一层**：这里命中的是**硬性加载期依赖**，在 Win7 上会直接导致 DLL 加载失败 |
+
+最后一层为什么准：**延迟加载的导入位于 Delayload 目录（DataDirectory[13]），不在常规导入表里**，
+所以延迟加载 / `GetProcAddress` 保护的调用不会被误报——而这正是上游补丁的实现方式。
+
+### ⚠️ 真机验证（必做）
+
+GitHub 托管 runner 是 Windows Server，无法真正运行 Win7。**发布前务必在真实 Windows 7 x64 上做一次**：
+
+```bat
+:: 1) 解包
+7z x Qt-6.8.4-msvc2022-Windows7x64-shared-Release.7z -oC:\Qt\6.8.4-win7
+
+:: 2) 确认 Qt 核心库能被加载（最关键的一步）
+dumpbin /imports C:\Qt\6.8.4-win7\bin\Qt6Core.dll | findstr /I "GetDpiForWindow GetAddrInfoEx RoGetActivationFactory"
+::   无输出 = 没有静态依赖 Win8+ 函数
+
+:: 3) 跑一个最小 Widgets 程序（Win7 需先装 VC++ 运行库）
+::    Visual C++ Redistributable for Visual Studio 2015-2022 (x64)
+cmake -S tests\hello -B build -DCMAKE_PREFIX_PATH=C:\Qt\6.8.4-win7
+cmake --build build --config Release
+```
+
+要点：
+- Win7 必须装 **VC++ 2015–2022 运行库**（Qt 用 MSVC 编的，依赖 `VCRUNTIME140.dll` / `MSVCP140.dll` / `ucrtbase.dll`）。
+- 若某 DLL 加载失败，用 `dumpbin /imports` 或 Dependencies 工具看它静态依赖了哪个 Win8+ 函数，
+  那就是上游补丁没覆盖到的点。
+
 ## 产物内容
 
 压缩包根节点就是 Qt 的安装前缀：
