@@ -378,6 +378,12 @@ jobs:
           if [ "$ARCH" = "x64" ]; then SUFFIX=""; else SUFFIX="_${ARCH}"; fi
           TAG="v${VERSION}-win7${SUFFIX}"
 
+          # 解压命令按实际产物格式给出（7z 不可用时 Package 会退回 tar.gz）
+          case "$NAME" in
+            *.tar.gz|*.tgz) EXTRACT="tar -xzf ${NAME} -C \"C:/Qt/${VERSION}-win7\"" ;;
+            *)              EXTRACT="7z x ${NAME} -o\"C:/Qt/${VERSION}-win7\"" ;;
+          esac
+
           cat > notes.md <<EOF
           # Qt ${VERSION} for Windows 7 (${ARCH}, shared / Release)
 
@@ -398,7 +404,7 @@ jobs:
 
           \`\`\`bat
           mkdir "C:/Qt/${VERSION}-win7"
-          7z x ${NAME} -o"C:/Qt/${VERSION}-win7"
+          ${EXTRACT}
           \`\`\`
 
           然后把 CMake 指向解开出来的前缀：

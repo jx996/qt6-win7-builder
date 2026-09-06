@@ -188,6 +188,9 @@ cmake --build build --config Release
 
 ## 产物内容
 
+产物优先打成 **`.7z`**；若运行环境里没有 7-Zip，会**自动退回 `.tar.gz`**（内容完全相同，只是体积更大），
+文件名相应变为 `Qt-<版本>-msvc2022-Windows7x64-shared-Release.tar.gz`，Release 说明里的解压命令也会随之变化。
+
 压缩包根节点就是 Qt 的安装前缀：
 
 ```text

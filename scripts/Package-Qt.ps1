@@ -2,7 +2,8 @@
 <#
 .SYNOPSIS
     Packs a built Qt install into "Qt-<version>-msvc2022-Windows7<x64|x86>-shared-Release.7z"
-    plus a SHA-256 file, and exports the artifact coordinates to $GITHUB_OUTPUT.
+    (or .tar.gz when 7-Zip is unavailable) plus a SHA-256 file, and exports the
+    artifact coordinates to $GITHUB_OUTPUT.
 
 .DESCRIPTION
     The archive contains the install tree at its root (bin/, lib/, plugins/,
@@ -31,16 +32,8 @@ if (-not (Test-Path -LiteralPath $InstallDir)) { throw "Install dir not found: $
 $null = New-Item -ItemType Directory -Path $OutDir -Force
 
 $plat = if ($Arch -eq 'x64') { 'x64' } else { $Arch }
-$name = "Qt-${Version}-msvc2022-Windows7${plat}-shared-Release.7z"
-$outFile = Join-Path $OutDir $name
 
-if ($InfoFile -and (Test-Path -LiteralPath $InfoFile)) {
-    Copy-Item -LiteralPath $InfoFile -Destination (Join-Path $InstallDir 'BUILDINFO.txt') -Force
-    Write-Info 'embedded BUILDINFO.txt'
-}
-
-Remove-Item -LiteralPath $outFile -Force -ErrorAction SilentlyContinue
-
+# Prefer 7z (smaller archives, faster); fall back to tar.gz when 7-Zip is absent.
 $sevenZipCmd = @('7z', '7z.exe', '7za.exe') |
     ForEach-Object { Get-Command $_ -ErrorAction SilentlyContinue } |
     Select-Object -First 1
@@ -52,24 +45,54 @@ if (-not $sevenZip) {
         "${env:ProgramFiles(x86)}\7-Zip\7z.exe"
     ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 }
-if (-not $sevenZip) { throw "7-Zip (7z) not found in PATH or the standard install locations; cannot create the .7z package" }
+$use7z = [bool]$sevenZip
+$ext = if ($use7z) { '7z' } else { 'tar.gz' }
 
-Write-Info "creating $name (7z, compression level $CompressionLevel)"
-# Package the install tree at the archive root, so extraction drops bin/ lib/ ...
-# directly into the target prefix. -mx1 keeps packaging fast; -mmt uses all cores.
-Push-Location -LiteralPath $InstallDir
-try {
-    & $sevenZip 'a' '-t7z' "-mx$CompressionLevel" '-mmt' $outFile '.' 2>&1 | ForEach-Object { Write-Host $_ }
-    $code = $LASTEXITCODE
+$name = "Qt-${Version}-msvc2022-Windows7${plat}-shared-Release.$ext"
+$outFile = Join-Path $OutDir $name
+
+if ($InfoFile -and (Test-Path -LiteralPath $InfoFile)) {
+    Copy-Item -LiteralPath $InfoFile -Destination (Join-Path $InstallDir 'BUILDINFO.txt') -Force
+    Write-Info 'embedded BUILDINFO.txt'
 }
-finally { Pop-Location }
 
-# 7-Zip exit codes: 0 = ok, 1 = warning (non fatal, archive was still written),
-# 2 = fatal error, 7 = command line error, 8 = out of memory, 255 = user stop.
-# Do NOT treat 1 as failure - that is the same class of bug as robocopy's 1..7.
-if ($code -ge 2) { throw "7z failed (exit code $code) creating $outFile" }
-if ($code -eq 1) { Write-Note "7z returned 1 (warning, non fatal) - archive should still be valid" }
-Reset-LastExitCode
+Remove-Item -LiteralPath $outFile -Force -ErrorAction SilentlyContinue
+
+if ($use7z) {
+    Write-Info "creating $name (7z, compression level $CompressionLevel)"
+    # Package the install tree at the archive root, so extraction drops bin/ lib/ ...
+    # directly into the target prefix. -mx1 keeps packaging fast; -mmt uses all cores.
+    Push-Location -LiteralPath $InstallDir
+    try {
+        & $sevenZip 'a' '-t7z' "-mx$CompressionLevel" '-mmt' $outFile '.' 2>&1 | ForEach-Object { Write-Host $_ }
+        $code = $LASTEXITCODE
+    }
+    finally { Pop-Location }
+
+    # 7-Zip exit codes: 0 = ok, 1 = warning (non fatal, archive was still written),
+    # 2 = fatal error, 7 = command line error, 8 = out of memory, 255 = user stop.
+    # Do NOT treat 1 as failure - that is the same class of bug as robocopy's 1..7.
+    if ($code -ge 2) { throw "7z failed (exit code $code) creating $outFile" }
+    if ($code -eq 1) { Write-Note "7z returned 1 (warning, non fatal) - archive should still be valid" }
+    Reset-LastExitCode
+}
+else {
+    Write-Note '7-Zip not available - falling back to tar.gz (same content, just a bigger archive)'
+    Write-Info "creating $name (tar.gz, gzip level $CompressionLevel)"
+    # bsdtar (C:\Windows\system32\tar.exe) understands --options for gzip settings;
+    # if that fails for any reason, retry with plain defaults.
+    & tar.exe --options "gzip:compression-level=$CompressionLevel" -czf $outFile -C $InstallDir '.' 2>&1 |
+        ForEach-Object { Write-Host $_ }
+    $code = $LASTEXITCODE
+    if ($code -ne 0) {
+        Write-Note "tar with a compression hint failed (code $code), retrying with defaults"
+        Reset-LastExitCode
+        & tar.exe -czf $outFile -C $InstallDir '.' 2>&1 | ForEach-Object { Write-Host $_ }
+        $code = $LASTEXITCODE
+    }
+    if ($code -ne 0) { throw "tar failed (exit code $code) creating $outFile" }
+    Reset-LastExitCode
+}
 
 if (-not (Test-Path -LiteralPath $outFile)) { throw "Packaging failed: $outFile was not created" }
 
