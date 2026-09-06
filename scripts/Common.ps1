@@ -151,7 +151,88 @@ function Save-RemoteFile {
 
 <#
 .SYNOPSIS
-    Extracts .tar.gz / .tar.xz / .zip / .7z, using bsdtar first and 7-Zip as fallback.
+    Runs a native command with a periodic progress heartbeat, and returns its exit code.
+
+.DESCRIPTION
+    Some runner images extract huge archives pathologically slowly (bsdtar on
+    windows-2022 took >2h for what takes ~2 min elsewhere). Without output, a hung
+    step is indistinguishable from a slow one, so this runs the process via
+    Start-Process and prints a heartbeat (file count / archive size + elapsed time)
+    every $HeartbeatSeconds while it runs.
+
+    Use -MaxMinutes to fail fast instead of silently burning the job's time budget
+    (0 = unlimited).
+#>
+function Start-NativeWithHeartbeat {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [string]$WatchPath,
+        [int]$HeartbeatSeconds = 120,
+        [int]$MaxMinutes = 75
+    )
+
+    $start = Get-Date
+    $tag = Split-Path -Leaf $FilePath
+    $outLog = Join-Path ([IO.Path]::GetTempPath()) ("hbout-" + [Guid]::NewGuid().ToString('N') + '.log')
+    $errLog = Join-Path ([IO.Path]::GetTempPath()) ("hberr-" + [Guid]::NewGuid().ToString('N') + '.log')
+
+    # Build the argument string ourselves: Start-Process does not reliably quote
+    # array elements that contain spaces.
+    $argString = ($ArgumentList | ForEach-Object {
+        if ($_ -match '\s' -and $_ -notmatch '^".*"$') { '"{0}"' -f $_ } else { $_ }
+    }) -join ' '
+    Write-Info "$tag $argString"
+
+    $proc = Start-Process -FilePath $FilePath -ArgumentList $argString -NoNewWindow -PassThru `
+        -RedirectStandardOutput $outLog -RedirectStandardError $errLog
+
+    while (-not $proc.HasExited) {
+        Start-Sleep -Seconds $HeartbeatSeconds
+
+        if ($proc.HasExited) { break }
+
+        $detail = ''
+        if ($WatchPath) {
+            if (Test-Path -LiteralPath $WatchPath -PathType Container) {
+                $n = (Get-ChildItem -LiteralPath $WatchPath -Recurse -File -ErrorAction SilentlyContinue |
+                    Measure-Object).Count
+                $detail = "{0} files" -f $n
+            }
+            elseif (Test-Path -LiteralPath $WatchPath -PathType Leaf) {
+                $detail = "{0:N0} MB" -f ((Get-Item -LiteralPath $WatchPath).Length / 1MB)
+            }
+        }
+        $elapsed = (Get-Date) - $start
+        Write-Host ("    [heartbeat] {0} | {1:hh\:mm\:ss} elapsed" -f $detail, $elapsed)
+
+        if ($MaxMinutes -gt 0 -and $elapsed.TotalMinutes -gt $MaxMinutes) {
+            try { $proc.Kill($true) } catch { $proc.Kill() }
+            throw ("{0} exceeded the {1} minute budget - aborting instead of burning the job's time. " +
+                   "Last output: {2}") -f $tag, $MaxMinutes, $errLog
+        }
+    }
+
+    $proc.WaitForExit()
+    $code = $proc.ExitCode
+
+    if ($code -ne 0) {
+        $tail = ''
+        if (Test-Path -LiteralPath $errLog) {
+            $tail = (Get-Content -LiteralPath $errLog -Tail 15 -ErrorAction SilentlyContinue) -join "`n"
+        }
+        if ($tail) { Write-Note "stderr tail:`n$tail" }
+    }
+
+    Remove-Item -LiteralPath $outLog, $errLog -Force -ErrorAction SilentlyContinue
+    Reset-LastExitCode
+    return $code
+}
+
+<#
+.SYNOPSIS
+    Extracts .tar.gz / .tar.xz / .zip / .7z, preferring 7-Zip and falling back to tar.
 #>
 function Expand-ArchiveUniversal {
     [CmdletBinding()]
@@ -162,30 +243,65 @@ function Expand-ArchiveUniversal {
 
     $null = New-Item -ItemType Directory -Path $Destination -Force
 
-    $previous = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        & tar.exe -xf $Path -C $Destination 2>&1 | ForEach-Object { Write-Host $_ }
-        $code = $LASTEXITCODE
+    # Prefer 7z: the bundled bsdtar on some runner images extracts huge trees
+    # pathologically slowly (a 948 MB qt-everywhere tar.xz took >2h on windows-2022
+    # vs ~2 min elsewhere). 7-Zip is guaranteed available via the
+    # "Ensure 7-Zip" workflow step and is a completely different code path.
+    $sevenZipCmd = @('7z', '7z.exe', '7za.exe') |
+        ForEach-Object { Get-Command $_ -ErrorAction SilentlyContinue } |
+        Select-Object -First 1
+    $sevenZip = if ($sevenZipCmd) { $sevenZipCmd.Source } else { $null }
+    if (-not $sevenZip) {
+        $sevenZip = @(
+            "$env:ProgramFiles\7-Zip\7z.exe",
+            "${env:ProgramFiles(x86)}\7-Zip\7z.exe"
+        ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
     }
-    finally { $ErrorActionPreference = $previous }
 
+    if ($sevenZip) {
+        try {
+            if ($Path -match '\.(tar\.(gz|xz|bz2)|tgz)$') {
+                # Two passes: container -> plain .tar -> directory.
+                $inner = Join-Path (Split-Path -Parent $Path) ([IO.Path]::GetFileNameWithoutExtension($Path))
+                Write-Info '7z pass 1/2: unwrapping the container'
+                $code = Start-NativeWithHeartbeat -FilePath $sevenZip `
+                    -ArgumentList @('x', "-o$(Split-Path -Parent $Path)", '-y', $Path) `
+                    -WatchPath $inner
+                if ($code -ne 0) { throw "7z pass 1 failed (exit code $code)" }
+
+                Write-Info '7z pass 2/2: unpacking the tar'
+                $code = Start-NativeWithHeartbeat -FilePath $sevenZip `
+                    -ArgumentList @('x', "-o$Destination", '-y', $inner) `
+                    -WatchPath $Destination
+                if ($code -ne 0) { throw "7z pass 2 failed (exit code $code)" }
+
+                Remove-Item -LiteralPath $inner -Force -ErrorAction SilentlyContinue
+            }
+            else {
+                $code = Start-NativeWithHeartbeat -FilePath $sevenZip `
+                    -ArgumentList @('x', "-o$Destination", '-y', $Path) `
+                    -WatchPath $Destination
+                if ($code -ne 0) { throw "7z failed (exit code $code)" }
+            }
+            Write-Ok "extracted with 7z: $Path"
+            return
+        }
+        catch {
+            Write-Note "7z extraction failed: $($_.Exception.Message)"
+            Write-Note 'cleaning up and falling back to tar'
+            Reset-LastExitCode
+            Remove-Item -LiteralPath $Destination -Recurse -Force -ErrorAction SilentlyContinue
+            $null = New-Item -ItemType Directory -Path $Destination -Force
+        }
+    }
+
+    # Fallback: bsdtar, still with a heartbeat so a slow extraction stays observable.
+    $code = Start-NativeWithHeartbeat -FilePath 'tar.exe' `
+        -ArgumentList @('-xf', $Path, '-C', $Destination) `
+        -WatchPath $Destination
     if ($code -eq 0) { Write-Ok "extracted with tar: $Path"; Reset-LastExitCode; return }
 
-    Write-Note "tar failed (code $code), falling back to 7z"
-    $sevenZip = @('7z', '7z.exe', '7za.exe') | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
-    if (-not $sevenZip) { throw "Extraction failed and 7-Zip was not found in PATH" }
-
-    if ($Path -match '\.(tar\.(gz|xz|bz2)|tgz)$') {
-        $inner = Join-Path (Split-Path -Parent $Path) ([IO.Path]::GetFileNameWithoutExtension($Path))
-        Invoke-External $sevenZip 'x' $Path "-o$(Split-Path -Parent $Path)" '-y' -Quiet
-        Invoke-External $sevenZip 'x' $inner "-o$Destination" '-y' -Quiet
-        Remove-Item -LiteralPath $inner -Force -ErrorAction SilentlyContinue
-    }
-    else {
-        Invoke-External $sevenZip 'x' $Path "-o$Destination" '-y' -Quiet
-    }
-    Write-Ok "extracted with 7z: $Path"
+    throw "Extraction failed: tar exited with code $code for $Path"
 }
 
 <#
