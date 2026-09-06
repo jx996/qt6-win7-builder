@@ -42,7 +42,14 @@ if ($InfoFile -and (Test-Path -LiteralPath $InfoFile)) {
 Remove-Item -LiteralPath $outFile -Force -ErrorAction SilentlyContinue
 
 $sevenZip = @('7z', '7z.exe', '7za.exe') | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
-if (-not $sevenZip) { throw "7-Zip (7z) not found in PATH; cannot create the .7z package" }
+if (-not $sevenZip) {
+    # Installed but not on PATH (the "Ensure 7-Zip" workflow step covers this too).
+    $sevenZip = @(
+        "$env:ProgramFiles\7-Zip\7z.exe",
+        "${env:ProgramFiles(x86)}\7-Zip\7z.exe"
+    ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+}
+if (-not $sevenZip) { throw "7-Zip (7z) not found in PATH or the standard install locations; cannot create the .7z package" }
 
 Write-Info "creating $name (7z, compression level $CompressionLevel)"
 # Package the install tree at the archive root, so extraction drops bin/ lib/ ...

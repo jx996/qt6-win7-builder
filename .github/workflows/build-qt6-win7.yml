@@ -170,6 +170,37 @@ jobs:
           }
           Write-Host "cores: $([Environment]::ProcessorCount)"
 
+      - name: Ensure 7-Zip is available
+        shell: pwsh
+        run: |
+          # Package-Qt 需要 7z 产出 .7z。官方 Windows 镜像一般都预装了 7-Zip，
+          # 但别赌：找不到就先用常见安装路径找，再不行用 Chocolatey 装。
+          $installDirs = @(
+            "$env:ProgramFiles\7-Zip",
+            "${env:ProgramFiles(x86)}\7-Zip"
+          )
+          $exe = @('7z', '7z.exe', '7za.exe') |
+            Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } |
+            Select-Object -First 1
+          if (-not $exe) {
+            $exe = $installDirs | ForEach-Object { Join-Path $_ '7z.exe' } |
+              Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+            if ($exe) { Write-Host "found 7z off-PATH at $exe" }
+          }
+          if (-not $exe) {
+            Write-Host '7-Zip not found - installing via Chocolatey'
+            choco install 7zip -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "choco install 7zip failed (exit code $LASTEXITCODE)" }
+            $global:LASTEXITCODE = 0
+            $exe = $installDirs | ForEach-Object { Join-Path $_ '7z.exe' } |
+              Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+            if (-not $exe) { throw '7-Zip still missing after the Chocolatey install' }
+            # PATH 变更从下一个步骤开始生效,正好供 Package 步骤使用。
+            Add-Content -LiteralPath $env:GITHUB_PATH -Value (Split-Path -Parent $exe)
+          }
+          if (-not (Test-Path -LiteralPath $exe)) { throw "7z executable not usable: $exe" }
+          Write-Host "7-Zip OK: $exe"
+
       - name: Fetch Qt source
         shell: pwsh
         run: |
